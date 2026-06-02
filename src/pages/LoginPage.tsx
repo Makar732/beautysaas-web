@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sparkles, User, Phone, ArrowRight, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -9,14 +9,20 @@ import { PhoneInput, isPhoneComplete } from '../components/ui/PhoneInput';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { loginAsGuest, loginWithGoogle } = useAuth();
+  const { user, loginWithGoogle, completeOnboarding, needsOnboarding } = useAuth();
 
-  const [showOnboarding, setShowOnboarding] = useState(false);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [errors, setErrors] = useState<{ name?: string; phone?: string }>({});
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+
+  // Редирект если уже залогинен и онбординг не нужен
+  useEffect(() => {
+    if (user && !needsOnboarding) {
+      navigate('/dashboard');
+    }
+  }, [user, needsOnboarding, navigate]);
 
   const validate = () => {
     const newErrors: { name?: string; phone?: string } = {};
@@ -30,24 +36,20 @@ export default function LoginPage() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleGuestLogin = () => {
-    setShowOnboarding(true);
+  const handleGoogleLogin = async () => {
+    setGoogleLoading(true);
+    await new Promise((r) => setTimeout(r, 800));
+    loginWithGoogle();
+    setGoogleLoading(false);
+    // navigate будет вызван через useEffect когда user обновится
   };
 
   const handleOnboardingSubmit = async () => {
     if (!validate()) return;
     setLoading(true);
     await new Promise((r) => setTimeout(r, 600));
-    loginAsGuest(name.trim(), phone.trim());
+    completeOnboarding(name.trim(), phone.trim());
     setLoading(false);
-    navigate('/dashboard');
-  };
-
-  const handleGoogleLogin = async () => {
-    setGoogleLoading(true);
-    await new Promise((r) => setTimeout(r, 1000));
-    loginWithGoogle();
-    setGoogleLoading(false);
     navigate('/dashboard');
   };
 
@@ -71,17 +73,20 @@ export default function LoginPage() {
             </span>
           </a>
           <h1 className="text-3xl font-bold text-white mb-2">Добро пожаловать!</h1>
-          <p className="text-gray-400">Войдите в систему или начните в демо-режиме</p>
+          <p className="text-gray-400">Войдите в систему для управления записями</p>
         </div>
 
         {/* Card */}
         <div className="bg-gray-900 rounded-3xl border border-white/8 p-8 shadow-2xl">
+          <p className="text-gray-400 text-sm text-center mb-6">
+            Войдите чтобы получить доступ к панели мастера
+          </p>
 
           {/* Google Login */}
           <button
             onClick={handleGoogleLogin}
             disabled={googleLoading}
-            className="w-full flex items-center justify-center gap-3 bg-white hover:bg-gray-100 text-gray-900 font-semibold py-3.5 px-6 rounded-2xl transition-all duration-200 active:scale-95 mb-4 cursor-pointer disabled:opacity-60"
+            className="w-full flex items-center justify-center gap-3 bg-white hover:bg-gray-100 text-gray-900 font-semibold py-3.5 px-6 rounded-2xl transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-60"
           >
             {googleLoading ? (
               <Loader2 size={20} className="animate-spin" />
@@ -96,39 +101,7 @@ export default function LoginPage() {
             {googleLoading ? 'Входим...' : 'Войти через Google'}
           </button>
 
-          {/* Divider */}
-          <div className="flex items-center gap-4 my-6">
-            <div className="flex-1 h-px bg-white/10" />
-            <span className="text-gray-500 text-sm">или</span>
-            <div className="flex-1 h-px bg-white/10" />
-          </div>
-
-          {/* Demo Login */}
-          <div className="bg-gradient-to-br from-emerald-900/30 to-emerald-950/30 rounded-2xl border border-emerald-700/30 p-6 mb-2">
-            <div className="flex items-start gap-3 mb-4">
-              <div className="bg-emerald-500/20 p-2 rounded-xl shrink-0">
-                <Sparkles className="text-emerald-400" size={18} />
-              </div>
-              <div>
-                <h3 className="font-bold text-white text-sm">Демо-режим</h3>
-                <p className="text-gray-400 text-xs mt-1">
-                  Все данные хранятся в браузере. Идеально для тестирования всех функций платформы.
-                </p>
-              </div>
-            </div>
-
-            <Button
-              variant="amber"
-              size="md"
-              className="w-full"
-              onClick={handleGuestLogin}
-            >
-              Войти в демо-режим (Как гость)
-              <ArrowRight size={18} />
-            </Button>
-          </div>
-
-          <p className="text-xs text-gray-600 text-center mt-4">
+          <p className="text-xs text-gray-600 text-center mt-6">
             Нажимая кнопку, вы соглашаетесь с{' '}
             <a href="#/privacy" className="text-emerald-400 hover:text-emerald-300 transition-colors">
               политикой конфиденциальности
@@ -146,18 +119,19 @@ export default function LoginPage() {
 
       {/* Onboarding Modal */}
       <Modal
-        isOpen={showOnboarding}
-        onClose={() => setShowOnboarding(false)}
+        isOpen={needsOnboarding}
+        onClose={() => {}}
         title="Расскажите о себе"
       >
         <div className="space-y-4">
           <p className="text-gray-500 text-sm">
-            Эти данные нужны для создания вашей персональной страницы записи и профиля мастера.
+            Вы входите впервые. Заполните профиль — это займёт 30 секунд.
+            Данные сохранятся в вашем браузере.
           </p>
 
           <div className="relative">
             <Input
-              label="Имя или название студии"
+              label="ФИО или название компании"
               placeholder="Например: Ирина Козлова или Студия Beauty"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -177,10 +151,10 @@ export default function LoginPage() {
             <Phone size={16} className="absolute right-4 top-10 text-gray-400 pointer-events-none" />
           </div>
 
-          {name && !errors.name && (
+          {name.trim().length >= 2 && (
             <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
               <p className="text-xs text-emerald-700">
-                Ваша ссылка для записи:{' '}
+                Ваша ссылка для записи клиентов:{' '}
                 <span className="font-mono font-bold">
                   /book/{name.toLowerCase()
                     .replace(/\s+/g, '-')

@@ -6,8 +6,10 @@ import { generateSlug } from '../lib/transliterate';
 interface AuthContextType {
   user: AppUser | null;
   isAuthenticated: boolean;
+  needsOnboarding: boolean;
   loginAsGuest: (name: string, phone: string) => void;
   loginWithGoogle: () => void;
+  completeOnboarding: (name: string, phone: string) => void;
   logout: () => void;
   updateUser: (updates: Partial<AppUser>) => void;
 }
@@ -16,6 +18,7 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
 
   useEffect(() => {
     initStorage();
@@ -49,24 +52,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     upsertMaster(master);
     saveUser(newUser);
     setUser(newUser);
+    setNeedsOnboarding(false);
   };
 
   const loginWithGoogle = () => {
-    // Google OAuth stub — подключить реальный провайдер при необходимости
-    const stubUser: AppUser = {
-      id: 'google-user-stub',
-      name: 'Ирина Козлова',
-      phone: '+7 900 123-45-67',
-      slug: 'irina-kozlova',
+    // Проверяем — есть ли уже сохранённый юзер в localStorage
+    const savedUser = getUser();
+    if (savedUser) {
+      // Уже заполнял онбординг ранее — пускаем сразу
+      setUser(savedUser);
+      setNeedsOnboarding(false);
+    } else {
+      // Первый вход — нужен онбординг
+      setNeedsOnboarding(true);
+    }
+  };
+
+  const completeOnboarding = (name: string, phone: string) => {
+    const slug = generateSlug(name);
+    const id = `master-${slug}-${Date.now()}`;
+
+    const newUser: AppUser = {
+      id,
+      name,
+      phone,
+      slug,
       isGuest: false,
     };
-    saveUser(stubUser);
-    setUser(stubUser);
+
+    const master = {
+      id,
+      name,
+      slug,
+      phone,
+      telegram_chat_id: '',
+      created_at: new Date().toISOString(),
+    };
+
+    upsertMaster(master);
+    saveUser(newUser);
+    setUser(newUser);
+    setNeedsOnboarding(false);
   };
 
   const logout = () => {
     clearUser();
     setUser(null);
+    setNeedsOnboarding(false);
   };
 
   const updateUser = (updates: Partial<AppUser>) => {
@@ -75,7 +107,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     saveUser(updated);
     setUser(updated);
 
-    // Sync to master profile
     upsertMaster({
       id: updated.id,
       name: updated.name,
@@ -87,7 +118,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, loginAsGuest, loginWithGoogle, logout, updateUser }}>
+    <AuthContext.Provider value={{
+      user,
+      isAuthenticated: !!user,
+      needsOnboarding,
+      loginAsGuest,
+      loginWithGoogle,
+      completeOnboarding,
+      logout,
+      updateUser,
+    }}>
       {children}
     </AuthContext.Provider>
   );
