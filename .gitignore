@@ -1,2 +1,11 @@
+# Зависимости
 node_modules
+
+# Сборка
 dist
+
+# Переменные окружения — НИКОГДА не пушим в git!
+.env
+.env.local
+.env.production
+.env.*.local
