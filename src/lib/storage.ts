@@ -1,11 +1,6 @@
 import { Master, Service, Booking, AppUser } from '../types';
 
-// ============================================================
-// TELEGRAM BOT CONFIGURATION
-// Вставьте токен вашего Telegram-бота здесь:
-// ============================================================
 export const TELEGRAM_BOT_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN_HERE';
-// ============================================================
 
 const KEYS = {
   USER: 'beauty_saas_user',
@@ -13,114 +8,6 @@ const KEYS = {
   SERVICES: 'beauty_saas_services',
   BOOKINGS: 'beauty_saas_bookings',
 };
-
-// Default demo master
-const DEFAULT_MASTER: Master = {
-  id: 'master-irina-kozlova',
-  name: 'Ирина Козлова',
-  slug: 'irina-kozlova',
-  phone: '+7 900 123-45-67',
-  telegram_chat_id: '',
-  created_at: new Date().toISOString(),
-  workingHours: {
-    start: '09:00',
-    end: '21:00',
-  },
-  daysOff: [0], // воскресенье выходной по умолчанию
-};
-
-const DEFAULT_SERVICES: Service[] = [
-  {
-    id: 'svc-1',
-    master_id: 'master-irina-kozlova',
-    name: 'Маникюр + покрытие',
-    price: 1500,
-    duration: 90,
-    description: 'Классический маникюр с гель-лаком, любой дизайн',
-  },
-  {
-    id: 'svc-2',
-    master_id: 'master-irina-kozlova',
-    name: 'Педикюр + покрытие',
-    price: 2000,
-    duration: 120,
-    description: 'Аппаратный педикюр с гель-лаком',
-  },
-  {
-    id: 'svc-3',
-    master_id: 'master-irina-kozlova',
-    name: 'Наращивание ногтей',
-    price: 3500,
-    duration: 180,
-    description: 'Акрил или гель, любой дизайн',
-  },
-];
-
-function generateDemoBookings(): Booking[] {
-  const today = new Date();
-  const bookings: Booking[] = [];
-
-  const clients = [
-    { name: 'Анастасия Петрова', phone: '+7 916 234-56-78' },
-    { name: 'Екатерина Смирнова', phone: '+7 926 345-67-89' },
-    { name: 'Мария Иванова', phone: '+7 936 456-78-90' },
-    { name: 'Дарья Новикова', phone: '+7 906 567-89-01' },
-    { name: 'Ольга Федорова', phone: '+7 919 678-90-12' },
-    { name: 'Татьяна Морозова', phone: '+7 929 789-01-23' },
-    { name: 'Наталья Волкова', phone: '+7 939 890-12-34' },
-    { name: 'Светлана Козлова', phone: '+7 909 901-23-45' },
-  ];
-
-  const services = DEFAULT_SERVICES;
-  const statuses: Array<'pending' | 'confirmed'> = ['confirmed', 'confirmed', 'confirmed', 'pending'];
-
-  for (let dayOffset = -3; dayOffset <= 3; dayOffset++) {
-    const date = new Date(today);
-    date.setDate(date.getDate() + dayOffset);
-    const dateStr = date.toISOString().split('T')[0];
-
-    const numBookings = dayOffset === 0 ? 4 : Math.floor(Math.random() * 3) + 1;
-
-    const times = ['09:00', '10:30', '12:00', '13:30', '15:00', '16:30', '18:00', '19:30'];
-    const usedTimes = new Set<string>();
-
-    for (let i = 0; i < numBookings; i++) {
-      let time = times[Math.floor(Math.random() * times.length)];
-      while (usedTimes.has(time)) {
-        time = times[Math.floor(Math.random() * times.length)];
-      }
-      usedTimes.add(time);
-
-      const client = clients[Math.floor(Math.random() * clients.length)];
-      const service = services[Math.floor(Math.random() * services.length)];
-      const status = statuses[Math.floor(Math.random() * statuses.length)];
-
-      bookings.push({
-        id: `booking-demo-${dayOffset}-${i}`,
-        master_id: 'master-irina-kozlova',
-        service_id: service.id,
-        service_name: service.name,
-        client_name: client.name,
-        client_phone: client.phone,
-        date: dateStr,
-        time,
-        status,
-        created_at: new Date().toISOString(),
-      });
-    }
-  }
-
-  return bookings;
-}
-
-function initializeDefaultData() {
-  const masters = getMasters();
-  if (masters.length === 0) {
-    saveMasters([DEFAULT_MASTER]);
-    saveServices(DEFAULT_SERVICES);
-    saveBookings(generateDemoBookings());
-  }
-}
 
 // ---- MASTERS ----
 export function getMasters(): Master[] {
@@ -247,51 +134,7 @@ export function clearUser() {
   localStorage.removeItem(KEYS.USER);
 }
 
-// ---- INIT ----
+// Больше никаких автоматических Ирин Козловых!
 export function initStorage() {
-  initializeDefaultData();
+  // Оставлено пустым, чтобы не ломать импорты в других файлах
 }
-
-/*
-// ============================================================
-// SUPABASE ADAPTER (закомментирован — активируйте при добавлении ключей)
-// ============================================================
-import { createClient } from '@supabase/supabase-js';
-
-const SUPABASE_URL = 'YOUR_SUPABASE_URL';
-const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-export async function getMastersSupabase(): Promise<Master[]> {
-  const { data, error } = await supabase.from('profiles').select('*');
-  if (error) throw error;
-  return data || [];
-}
-
-export async function getServicesByMasterIdSupabase(masterId: string): Promise<Service[]> {
-  const { data, error } = await supabase.from('services').select('*').eq('master_id', masterId);
-  if (error) throw error;
-  return data || [];
-}
-
-export async function getBookingsByMasterIdSupabase(masterId: string): Promise<Booking[]> {
-  const { data, error } = await supabase.from('bookings').select('*').eq('master_id', masterId);
-  if (error) throw error;
-  return data || [];
-}
-
-export async function addBookingSupabase(booking: Booking): Promise<void> {
-  const { error } = await supabase.from('bookings').insert([booking]);
-  if (error) throw error;
-}
-
-export async function upsertServiceSupabase(service: Service): Promise<void> {
-  const { error } = await supabase.from('services').upsert([service]);
-  if (error) throw error;
-}
-
-export async function deleteServiceSupabase(id: string): Promise<void> {
-  const { error } = await supabase.from('services').delete().eq('id', id);
-  if (error) throw error;
-}
-*/

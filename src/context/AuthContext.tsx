@@ -7,7 +7,7 @@ interface AuthContextType {
   user: AppUser | null;
   isAuthenticated: boolean;
   needsOnboarding: boolean;
-  loginAsGuest: (name: string, phone: string) => void;
+  loginAsGuest: () => void;
   loginWithGoogle: () => void;
   completeOnboarding: (name: string, phone: string) => void;
   logout: () => void;
@@ -28,42 +28,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const loginAsGuest = (name: string, phone: string) => {
-    const slug = generateSlug(name);
-    const id = `master-${slug}-${Date.now()}`;
-
-    const newUser: AppUser = {
-      id,
-      name,
-      phone,
-      slug,
-      isGuest: true,
-    };
-
-    const master = {
-      id,
-      name,
-      slug,
-      phone,
-      telegram_chat_id: '',
-      created_at: new Date().toISOString(),
-    };
-
-    upsertMaster(master);
-    saveUser(newUser);
-    setUser(newUser);
-    setNeedsOnboarding(false);
+  const loginAsGuest = () => {
+    // Демо-вход (отключен)
   };
 
   const loginWithGoogle = () => {
-    // Проверяем — есть ли уже сохранённый юзер в localStorage
     const savedUser = getUser();
     if (savedUser) {
-      // Уже заполнял онбординг ранее — пускаем сразу
+      // Профиль уже есть, впускаем
       setUser(savedUser);
       setNeedsOnboarding(false);
     } else {
-      // Первый вход — нужен онбординг
+      // Профиля нет — показываем окно создания профиля
       setNeedsOnboarding(true);
     }
   };
@@ -87,6 +63,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       phone,
       telegram_chat_id: '',
       created_at: new Date().toISOString(),
+      workingHours: {
+        start: '09:00',
+        end: '21:00',
+      },
+      daysOff: [], // Без выходных по умолчанию
     };
 
     upsertMaster(master);
@@ -107,12 +88,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     saveUser(updated);
     setUser(updated);
 
+    // Синхронизация с профилем мастера
     upsertMaster({
       id: updated.id,
       name: updated.name,
       slug: updated.slug,
       phone: updated.phone,
       telegram_chat_id: updated.telegram_chat_id,
+      workingHours: updated.workingHours,
+      daysOff: updated.daysOff,
       created_at: new Date().toISOString(),
     });
   };

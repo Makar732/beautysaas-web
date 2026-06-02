@@ -94,16 +94,21 @@ export default function BookingPage() {
   const [calendarMonth, setCalendarMonth] = useState(today.getMonth());
 
   useEffect(() => {
+    // СТРОГАЯ СИНХРОНИЗАЦИЯ: Ищем только того мастера, чей slug в URL
     if (!master_slug) {
       setNotFound(true);
       return;
     }
+    
     const foundMaster = getMasterBySlug(master_slug);
+    
     if (!foundMaster) {
       setNotFound(true);
       return;
     }
+    
     setMaster(foundMaster);
+    // Берем услуги и записи ИМЕННО этого мастера
     setServices(getServicesByMasterId(foundMaster.id));
     setExistingBookings(getBookingsByMasterId(foundMaster.id));
   }, [master_slug]);
@@ -197,68 +202,65 @@ export default function BookingPage() {
   const stepIndex = { service: 0, datetime: 1, contacts: 2, success: 3 };
   const isContactsValid = clientName.trim().length >= 2 && isPhoneComplete(clientPhone);
 
-  // Мастер не найден
+  // Мастер не найден — показываем заглушку
   if (notFound) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="text-center max-w-md">
-          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <AlertCircle size={32} className="text-gray-400" />
+        <div className="text-center max-w-md bg-white p-8 rounded-3xl shadow-xl border border-gray-100">
+          <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
+            <AlertCircle size={40} className="text-red-500" />
           </div>
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Мастер не найден</h1>
-          <p className="text-gray-500 mb-6">
-            Страница мастера «{master_slug}» не существует или была удалена.
+          <p className="text-gray-500 mb-8">
+            Возможно, ссылка устарела или скопирована с ошибкой. Пожалуйста, проверьте URL.
           </p>
-          <Button variant="primary" onClick={() => navigate('/')}>
-            <Home size={16} />
-            На главную
+          <Button variant="primary" onClick={() => navigate('/')} className="w-full">
+            <Home size={18} className="mr-2" />
+            Вернуться на главную
           </Button>
         </div>
       </div>
     );
   }
 
-  // Загрузка
   if (!master) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+        <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-gradient-to-r from-emerald-800 to-emerald-900 text-white">
-        <div className="max-w-3xl mx-auto px-4 py-6">
+      <header className="bg-gradient-to-r from-emerald-800 to-emerald-900 text-white shadow-lg">
+        <div className="max-w-3xl mx-auto px-6 py-8">
           <div className="flex items-center gap-2 mb-4">
-            <Sparkles size={16} className="text-amber-400" />
-            <span className="text-sm font-medium text-emerald-300">BeautySaaS</span>
+            <Sparkles size={18} className="text-amber-400" />
+            <span className="text-sm font-semibold text-emerald-300 tracking-wider uppercase">BeautySaaS</span>
           </div>
-          <h1 className="text-2xl font-bold">{master.name}</h1>
-          <p className="text-emerald-300 text-sm mt-1">Онлайн-запись</p>
+          <h1 className="text-3xl font-bold mb-1">{master.name}</h1>
+          <p className="text-emerald-300 font-medium">Онлайн-запись</p>
 
-          {/* Step indicator */}
           {step !== 'success' && (
-            <div className="flex items-center gap-2 mt-5">
+            <div className="flex items-center gap-3 mt-8">
               {(['service', 'datetime', 'contacts'] as const).map((s, i) => (
-                <div key={s} className="flex items-center gap-2">
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                <div key={s} className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
                     stepIndex[step] > i
-                      ? 'bg-emerald-400 text-white'
+                      ? 'bg-emerald-400 text-white shadow-lg shadow-emerald-400/30'
                       : stepIndex[step] === i
-                      ? 'bg-amber-400 text-gray-900'
-                      : 'bg-white/20 text-white/50'
+                      ? 'bg-amber-400 text-gray-900 shadow-lg shadow-amber-400/30'
+                      : 'bg-white/10 text-white/40'
                   }`}>
-                    {stepIndex[step] > i ? <Check size={14} /> : i + 1}
+                    {stepIndex[step] > i ? <Check size={16} /> : i + 1}
                   </div>
-                  <span className={`text-sm hidden sm:block ${stepIndex[step] === i ? 'text-white font-medium' : 'text-white/50'}`}>
+                  <span className={`text-sm hidden sm:block ${stepIndex[step] === i ? 'text-white font-semibold' : 'text-white/40'}`}>
                     {s === 'service' && 'Услуга'}
                     {s === 'datetime' && 'Дата и время'}
                     {s === 'contacts' && 'Контакты'}
                   </span>
-                  {i < 2 && <div className={`h-px w-8 sm:w-16 ${stepIndex[step] > i ? 'bg-emerald-400' : 'bg-white/20'}`} />}
+                  {i < 2 && <div className={`h-px w-8 sm:w-16 ${stepIndex[step] > i ? 'bg-emerald-400' : 'bg-white/10'}`} />}
                 </div>
               ))}
             </div>
@@ -266,51 +268,53 @@ export default function BookingPage() {
         </div>
       </header>
 
-      {/* Content */}
-      <main className="max-w-3xl mx-auto px-4 py-8">
-
-        {/* STEP 1: Выбор услуги */}
+      <main className="max-w-3xl mx-auto px-4 py-8 pb-24">
         {step === 'service' && (
-          <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">Выберите услугу</h2>
-            <p className="text-gray-500 text-sm mb-6">
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Выберите услугу</h2>
+            <p className="text-gray-500 mb-8">
               {services.length === 0
                 ? 'Мастер пока не добавил услуги'
                 : `${services.length} ${services.length === 1 ? 'услуга' : 'услуги'} в прайсе`}
             </p>
 
             {services.length === 0 ? (
-              <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center">
-                <Scissors size={40} className="text-gray-300 mx-auto mb-3" />
-                <p className="text-gray-500">Мастер ещё не добавил услуги</p>
+              <div className="bg-white rounded-3xl border border-gray-200 p-12 text-center shadow-sm">
+                <Scissors size={48} className="text-gray-300 mx-auto mb-4" />
+                <p className="text-gray-500 text-lg">Мастер ещё не добавил услуги</p>
               </div>
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2">
                 {services.map((s) => (
                   <button
                     key={s.id}
                     onClick={() => { setSelectedService(s); setStep('datetime'); }}
-                    className="bg-white rounded-2xl border-2 border-gray-100 p-5 text-left hover:border-emerald-300 hover:shadow-md transition-all cursor-pointer group"
+                    className="bg-white rounded-3xl border border-gray-200 p-6 text-left hover:border-emerald-400 hover:shadow-xl hover:shadow-emerald-900/5 transition-all cursor-pointer group relative overflow-hidden"
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <div className="bg-emerald-100 p-2 rounded-xl shrink-0 group-hover:bg-emerald-200 transition-colors">
-                          <Scissors size={18} className="text-emerald-600" />
+                    <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity transform translate-x-4 group-hover:translate-x-0">
+                      <ArrowRight className="text-emerald-500" size={20} />
+                    </div>
+                    
+                    <div className="flex flex-col h-full justify-between">
+                      <div>
+                        <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-4 group-hover:bg-emerald-500 group-hover:text-white transition-colors">
+                          <Scissors size={20} />
                         </div>
-                        <div className="min-w-0">
-                          <p className="font-semibold text-gray-900 truncate">{s.name}</p>
-                          {s.description && (
-                            <p className="text-xs text-gray-500 mt-0.5 truncate">{s.description}</p>
-                          )}
-                          <div className="flex items-center gap-1 mt-1">
-                            <Clock size={11} className="text-gray-400" />
-                            <span className="text-xs text-gray-400">{s.duration} мин</span>
-                          </div>
-                        </div>
+                        <h3 className="font-bold text-gray-900 text-lg mb-1 pr-6">{s.name}</h3>
+                        {s.description && (
+                          <p className="text-sm text-gray-500 mb-4 line-clamp-2">{s.description}</p>
+                        )}
                       </div>
-                      <p className="font-bold text-emerald-600 text-lg shrink-0">
-                        {s.price.toLocaleString('ru-RU')} ₽
-                      </p>
+                      
+                      <div className="flex items-end justify-between mt-4 pt-4 border-t border-gray-100">
+                        <div className="flex items-center gap-1.5 text-gray-400 bg-gray-50 px-3 py-1.5 rounded-lg">
+                          <Clock size={14} />
+                          <span className="text-sm font-medium">{s.duration} мин</span>
+                        </div>
+                        <p className="font-black text-emerald-600 text-xl">
+                          {s.price.toLocaleString('ru-RU')} ₽
+                        </p>
+                      </div>
                     </div>
                   </button>
                 ))}
@@ -319,47 +323,47 @@ export default function BookingPage() {
           </div>
         )}
 
-        {/* STEP 2: Дата и время */}
         {step === 'datetime' && selectedService && (
-          <div>
+          <div className="animate-in fade-in slide-in-from-right-4 duration-500">
             <button
               onClick={() => setStep('service')}
-              className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-6 cursor-pointer transition-colors"
+              className="inline-flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-gray-900 mb-6 bg-white px-4 py-2 rounded-xl border border-gray-200 shadow-sm transition-all"
             >
               <ChevronLeft size={16} />
               Назад к услугам
             </button>
 
-            {/* Выбранная услуга */}
-            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 mb-6 flex items-center justify-between">
+            <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-100 rounded-3xl p-6 mb-8 flex items-center justify-between shadow-sm">
               <div>
-                <p className="text-xs text-gray-500 mb-0.5">Выбранная услуга</p>
-                <p className="font-bold text-gray-900">{selectedService.name}</p>
-                <div className="flex items-center gap-1 mt-0.5">
-                  <Clock size={11} className="text-gray-400" />
-                  <span className="text-xs text-gray-500">{selectedService.duration} мин</span>
+                <p className="text-sm text-emerald-800/60 font-medium mb-1 uppercase tracking-wide">Выбранная услуга</p>
+                <p className="text-xl font-bold text-gray-900">{selectedService.name}</p>
+                <div className="flex items-center gap-1.5 mt-2 text-emerald-700 font-medium">
+                  <Clock size={14} />
+                  <span>{selectedService.duration} мин</span>
                 </div>
               </div>
-              <span className="font-bold text-emerald-600 text-xl">
+              <span className="font-black text-emerald-600 text-2xl">
                 {selectedService.price.toLocaleString('ru-RU')} ₽
               </span>
             </div>
 
-            <div className="grid gap-6 lg:grid-cols-2">
-              {/* Календарь */}
-              <div className="bg-white rounded-2xl border border-gray-200 p-5">
-                <h3 className="font-semibold text-gray-900 mb-4">Выберите дату</h3>
-                <div className="flex items-center justify-between mb-4">
+            <div className="grid gap-6 lg:grid-cols-2 items-start">
+              <div className="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
+                <h3 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-2">
+                  <Calendar className="text-emerald-500" size={20} />
+                  Выберите дату
+                </h3>
+                <div className="flex items-center justify-between mb-6">
                   <button
                     onClick={() => {
                       if (calendarMonth === 0) { setCalendarMonth(11); setCalendarYear(y => y - 1); }
                       else setCalendarMonth(m => m - 1);
                     }}
-                    className="p-2 hover:bg-gray-100 rounded-lg cursor-pointer transition-colors"
+                    className="w-10 h-10 flex items-center justify-center bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors"
                   >
-                    <ChevronLeft size={18} />
+                    <ChevronLeft size={20} />
                   </button>
-                  <span className="font-semibold text-gray-900">
+                  <span className="font-bold text-gray-900 text-lg">
                     {MONTH_NAMES[calendarMonth]} {calendarYear}
                   </span>
                   <button
@@ -367,21 +371,21 @@ export default function BookingPage() {
                       if (calendarMonth === 11) { setCalendarMonth(0); setCalendarYear(y => y + 1); }
                       else setCalendarMonth(m => m + 1);
                     }}
-                    className="p-2 hover:bg-gray-100 rounded-lg cursor-pointer transition-colors"
+                    className="w-10 h-10 flex items-center justify-center bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors"
                   >
-                    <ChevronRight size={18} />
+                    <ChevronRight size={20} />
                   </button>
                 </div>
 
-                <div className="grid grid-cols-7 gap-1 mb-2">
+                <div className="grid grid-cols-7 gap-2 mb-3">
                   {DAY_NAMES.map((d) => (
-                    <div key={d} className="text-center text-xs text-gray-400 font-medium py-1">{d}</div>
+                    <div key={d} className="text-center text-sm font-semibold text-gray-400">{d}</div>
                   ))}
                 </div>
 
-                <div className="grid grid-cols-7 gap-1">
+                <div className="grid grid-cols-7 gap-2">
                   {matrixDates.flat().map((d, i) => {
-                    if (!d) return <div key={i} />;
+                    if (!d) return <div key={i} className="aspect-square" />;
                     const isPast = d < today;
                     const isSelected = selectedDate && dateToStr(d) === dateToStr(selectedDate);
                     const isToday = dateToStr(d) === dateToStr(today);
@@ -396,14 +400,14 @@ export default function BookingPage() {
                         disabled={disabled}
                         onClick={() => { setSelectedDate(d); setSelectedTime(null); }}
                         title={dayOff ? 'Выходной день' : undefined}
-                        className={`aspect-square flex items-center justify-center rounded-xl text-sm font-medium transition-all ${
+                        className={`aspect-square flex items-center justify-center rounded-xl text-sm font-bold transition-all ${
                           disabled
-                            ? 'text-gray-300 cursor-not-allowed'
+                            ? 'text-gray-300 cursor-not-allowed bg-gray-50'
                             : isSelected
-                            ? 'bg-emerald-600 text-white font-bold shadow-md'
+                            ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/30 scale-105'
                             : isToday
-                            ? 'bg-emerald-100 text-emerald-700 font-bold'
-                            : 'hover:bg-emerald-50 hover:text-emerald-700 text-gray-700 cursor-pointer'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-100 hover:border-gray-200'
                         }`}
                       >
                         {d.getDate()}
@@ -413,28 +417,31 @@ export default function BookingPage() {
                 </div>
               </div>
 
-              {/* Слоты времени */}
-              <div className="bg-white rounded-2xl border border-gray-200 p-5">
-                <h3 className="font-semibold text-gray-900 mb-4">Выберите время</h3>
+              <div className="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
+                <h3 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-2">
+                  <Clock className="text-emerald-500" size={20} />
+                  Выберите время
+                </h3>
 
                 {!selectedDate ? (
-                  <div className="flex flex-col items-center justify-center h-48 text-center">
-                    <Calendar size={32} className="text-gray-300 mb-2" />
-                    <p className="text-gray-400 text-sm">Сначала выберите дату</p>
+                  <div className="flex flex-col items-center justify-center h-[280px] text-center bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+                    <Calendar size={48} className="text-gray-300 mb-4" />
+                    <p className="text-gray-500 font-medium">Сначала выберите дату слева</p>
                   </div>
                 ) : isDayOff(selectedDate) ? (
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center">
-                    <AlertCircle size={32} className="text-amber-500 mx-auto mb-2" />
-                    <p className="font-medium text-amber-800">🚫 У мастера выходной</p>
-                    <p className="text-xs text-amber-600 mt-1">Пожалуйста, выберите другой день</p>
+                  <div className="flex flex-col items-center justify-center h-[280px] text-center bg-red-50 rounded-2xl border border-red-100 p-6">
+                    <AlertCircle size={48} className="text-red-400 mb-4" />
+                    <p className="font-bold text-red-900 text-lg mb-1">У мастера выходной</p>
+                    <p className="text-red-600/80">Пожалуйста, выберите другой день для записи</p>
                   </div>
                 ) : (
-                  <>
-                    <p className="text-sm text-gray-500 mb-3 flex items-center gap-1">
-                      <Calendar size={13} className="text-emerald-600" />
+                  <div className="flex flex-col h-[280px]">
+                    <div className="bg-emerald-50 text-emerald-800 px-4 py-3 rounded-xl font-medium flex items-center gap-2 mb-4 shrink-0">
+                      <Check size={16} className="text-emerald-500" />
                       {formatDateRU(selectedDate)}
-                    </p>
-                    <div className="grid grid-cols-3 gap-2 max-h-64 overflow-y-auto pr-1">
+                    </div>
+                    
+                    <div className="grid grid-cols-3 gap-3 overflow-y-auto pr-2 pb-2 custom-scrollbar">
                       {allSlots.map((slot) => {
                         const occupied = isSlotOccupied(slot);
                         const past = isPastSlot(slot);
@@ -444,12 +451,12 @@ export default function BookingPage() {
                             key={slot}
                             disabled={disabled}
                             onClick={() => setSelectedTime(slot)}
-                            className={`py-2.5 rounded-xl text-sm font-medium transition-all ${
+                            className={`py-3.5 rounded-xl text-base font-bold transition-all ${
                               disabled
-                                ? 'bg-gray-50 text-gray-300 cursor-not-allowed line-through'
+                                ? 'bg-gray-50 text-gray-300 cursor-not-allowed border border-gray-100'
                                 : selectedTime === slot
-                                ? 'bg-emerald-600 text-white font-bold shadow-md'
-                                : 'bg-gray-50 text-gray-700 hover:bg-emerald-50 hover:text-emerald-700 border border-gray-100 cursor-pointer'
+                                ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
+                                : 'bg-white text-gray-700 hover:bg-emerald-50 hover:text-emerald-700 border border-gray-200 hover:border-emerald-200'
                             }`}
                           >
                             {slot}
@@ -457,71 +464,41 @@ export default function BookingPage() {
                         );
                       })}
                     </div>
-
-                    {selectedTime && (
-                      <Button
-                        variant="primary"
-                        size="md"
-                        className="w-full mt-4"
-                        onClick={() => setStep('contacts')}
-                      >
-                        Продолжить
-                        <ArrowRight size={16} />
-                      </Button>
-                    )}
-                  </>
+                  </div>
                 )}
               </div>
             </div>
+            
+            {selectedDate && selectedTime && (
+              <div className="mt-8 flex justify-end animate-in slide-in-from-bottom-4">
+                <Button
+                  variant="primary"
+                  size="lg"
+                  className="w-full lg:w-auto px-12 shadow-lg shadow-emerald-900/20"
+                  onClick={() => setStep('contacts')}
+                >
+                  Перейти к контактам
+                  <ArrowRight size={20} className="ml-2" />
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
-        {/* STEP 3: Контакты */}
         {step === 'contacts' && (
-          <div className="max-w-lg mx-auto">
+          <div className="max-w-xl mx-auto animate-in fade-in slide-in-from-right-4 duration-500">
             <button
               onClick={() => setStep('datetime')}
-              className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-6 cursor-pointer transition-colors"
+              className="inline-flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-gray-900 mb-6 bg-white px-4 py-2 rounded-xl border border-gray-200 shadow-sm transition-all"
             >
               <ChevronLeft size={16} />
-              Назад
+              Назад ко времени
             </button>
 
-            {/* Сводка */}
-            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-5 mb-6">
-              <h3 className="font-semibold text-gray-900 mb-3">Ваша запись</h3>
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Мастер</span>
-                  <span className="font-medium text-gray-900">{master.name}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Услуга</span>
-                  <span className="font-medium text-gray-900">{selectedService?.name}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Дата</span>
-                  <span className="font-medium text-gray-900">
-                    {selectedDate?.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Время</span>
-                  <span className="font-medium text-gray-900">{selectedTime}</span>
-                </div>
-                <div className="flex justify-between text-sm pt-2 border-t border-emerald-100">
-                  <span className="text-gray-500">Стоимость</span>
-                  <span className="font-bold text-emerald-600 text-base">
-                    {selectedService?.price.toLocaleString('ru-RU')} ₽
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Форма */}
-            <div className="bg-white rounded-2xl border border-gray-200 p-6">
-              <h2 className="font-bold text-gray-900 text-lg mb-4">Ваши контакты</h2>
-              <div className="space-y-4">
+            <div className="bg-white rounded-3xl border border-gray-200 p-8 shadow-sm">
+              <h2 className="font-bold text-gray-900 text-2xl mb-6">Ваши данные</h2>
+              
+              <div className="space-y-5 mb-8">
                 <div className="relative">
                   <Input
                     label="Ваше имя"
@@ -530,7 +507,7 @@ export default function BookingPage() {
                     onChange={(e) => setClientName(e.target.value)}
                     error={errors.name}
                   />
-                  <User size={16} className="absolute right-4 top-10 text-gray-400 pointer-events-none" />
+                  <User size={18} className="absolute right-4 top-10 text-gray-400 pointer-events-none" />
                 </div>
                 <div className="relative">
                   <PhoneInput
@@ -538,75 +515,100 @@ export default function BookingPage() {
                     value={clientPhone}
                     onChange={setClientPhone}
                     error={errors.phone}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none bg-white text-gray-900"
+                    className="w-full px-5 py-4 rounded-xl border border-gray-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none bg-white text-gray-900 text-base"
                   />
-                  <Phone size={16} className="absolute right-4 top-10 text-gray-400 pointer-events-none" />
+                  <Phone size={18} className="absolute right-4 top-10 text-gray-400 pointer-events-none" />
+                </div>
+              </div>
+
+              <div className="bg-gray-50 rounded-2xl p-5 mb-8 border border-gray-100">
+                <h3 className="font-semibold text-gray-900 mb-4 text-sm uppercase tracking-wide">Сводка заказа</h3>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-500 flex items-center gap-2"><Scissors size={14}/> Услуга</span>
+                    <span className="font-medium text-gray-900 text-right max-w-[60%] truncate">{selectedService?.name}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-500 flex items-center gap-2"><Calendar size={14}/> Дата</span>
+                    <span className="font-medium text-gray-900">
+                      {selectedDate?.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-500 flex items-center gap-2"><Clock size={14}/> Время</span>
+                    <span className="font-medium text-gray-900">{selectedTime}</span>
+                  </div>
+                  <div className="pt-3 mt-3 border-t border-gray-200 flex justify-between items-center">
+                    <span className="font-medium text-gray-900">К оплате</span>
+                    <span className="font-black text-emerald-600 text-xl">
+                      {selectedService?.price.toLocaleString('ru-RU')} ₽
+                    </span>
+                  </div>
                 </div>
               </div>
 
               <Button
-                variant="amber"
+                variant="primary"
                 size="lg"
-                className="w-full mt-6"
+                className="w-full py-4 text-lg shadow-lg shadow-emerald-900/20"
                 onClick={handleSubmit}
                 loading={loading}
                 disabled={!isContactsValid}
               >
-                {loading ? 'Отправляем...' : 'Записаться'}
-                {!loading && <ArrowRight size={16} />}
+                {loading ? 'Отправка заявки...' : 'Подтвердить запись'}
+                {!loading && <Check size={20} className="ml-2" />}
               </Button>
 
-              <p className="text-xs text-gray-400 text-center mt-3">
-                Нажимая кнопку, вы соглашаетесь с обработкой персональных данных
+              <p className="text-xs text-gray-400 text-center mt-4">
+                Нажимая кнопку, вы даете согласие на обработку персональных данных
               </p>
             </div>
           </div>
         )}
 
-        {/* STEP 4: Успех */}
         {step === 'success' && createdBooking && (
-          <div className="max-w-lg mx-auto text-center">
-            <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
-              <Check size={40} className="text-emerald-600" />
+          <div className="max-w-md mx-auto text-center animate-in zoom-in-95 duration-500">
+            <div className="w-24 h-24 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
+              <Check size={48} className="text-emerald-600" />
             </div>
 
-            <h2 className="text-2xl font-black text-gray-900 mb-2">Вы записаны! 🎉</h2>
-            <p className="text-gray-500 mb-8">
-              Мастер свяжется с вами для подтверждения
+            <h2 className="text-3xl font-black text-gray-900 mb-3">Вы успешно записаны!</h2>
+            <p className="text-gray-500 text-lg mb-8">
+              Мастер свяжется с вами для подтверждения.
             </p>
 
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 text-left space-y-3 mb-6">
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-500">Мастер</span>
-                <span className="text-sm font-medium text-gray-900">{master.name}</span>
+            <div className="bg-white rounded-3xl border border-gray-200 p-8 text-left shadow-lg mb-8">
+              <div className="flex items-center gap-4 border-b border-gray-100 pb-6 mb-6">
+                <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
+                  <User size={24} className="text-gray-500"/>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Ваш мастер</p>
+                  <p className="font-bold text-lg text-gray-900">{master.name}</p>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-500">Услуга</span>
-                <span className="text-sm font-medium text-gray-900">{createdBooking.service_name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-500">Дата</span>
-                <span className="text-sm font-medium text-gray-900">
-                  {new Date(createdBooking.date).toLocaleDateString('ru-RU', {
-                    day: 'numeric', month: 'long', year: 'numeric'
-                  })}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-500">Время</span>
-                <span className="text-sm font-bold text-emerald-600">{createdBooking.time}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-500">Клиент</span>
-                <span className="text-sm font-medium text-gray-900">{createdBooking.client_name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-500">Телефон</span>
-                <span className="text-sm font-medium text-gray-900">{createdBooking.client_phone}</span>
+
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm text-gray-500 mb-1">Услуга</p>
+                  <p className="font-semibold text-gray-900">{createdBooking.service_name}</p>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">Дата</p>
+                    <p className="font-semibold text-gray-900">
+                      {new Date(createdBooking.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">Время</p>
+                    <p className="font-bold text-emerald-600 text-lg">{createdBooking.time}</p>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="space-y-3">
+            <div className="flex flex-col gap-3">
               <Button
                 variant="primary"
                 size="lg"
@@ -621,29 +623,34 @@ export default function BookingPage() {
                   setCreatedBooking(null);
                 }}
               >
-                Записаться ещё раз
+                Сделать ещё одну запись
               </Button>
               <Button
                 variant="ghost"
-                size="md"
-                className="w-full text-gray-500"
+                size="lg"
+                className="w-full text-gray-600"
                 onClick={() => navigate('/')}
               >
-                <Home size={16} />
-                На главную
+                <Home size={18} className="mr-2" />
+                Вернуться на главную
               </Button>
             </div>
           </div>
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="text-center py-6 mt-8">
-        <a href="#/" className="inline-flex items-center gap-1.5 text-gray-400 hover:text-gray-600 transition-colors text-xs">
-          <Sparkles size={12} className="text-amber-400" />
-          Работает на BeautySaaS
-        </a>
-      </footer>
+      <style dangerouslySetInnerHTML={{__html: `
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background-color: #e5e7eb;
+          border-radius: 20px;
+        }
+      `}} />
     </div>
   );
 }
