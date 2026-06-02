@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
+import { PhoneInput, isPhoneComplete } from '../components/ui/PhoneInput';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -22,8 +23,8 @@ export default function LoginPage() {
     if (!name.trim() || name.trim().length < 2) {
       newErrors.name = 'Введите имя или название студии (минимум 2 символа)';
     }
-    if (!phone.trim() || phone.trim().length < 10) {
-      newErrors.phone = 'Введите корректный номер телефона';
+    if (!isPhoneComplete(phone)) {
+      newErrors.phone = 'Введите полный номер телефона';
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -49,6 +50,8 @@ export default function LoginPage() {
     setGoogleLoading(false);
     navigate('/dashboard');
   };
+
+  const isFormValid = name.trim().length >= 2 && isPhoneComplete(phone);
 
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4 relative overflow-hidden">
@@ -164,13 +167,12 @@ export default function LoginPage() {
           </div>
 
           <div className="relative">
-            <Input
+            <PhoneInput
               label="Номер телефона"
-              placeholder="+7 900 000-00-00"
-              type="tel"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={setPhone}
               error={errors.phone}
+              className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none bg-white text-gray-900"
             />
             <Phone size={16} className="absolute right-4 top-10 text-gray-400 pointer-events-none" />
           </div>
@@ -194,6 +196,7 @@ export default function LoginPage() {
             className="w-full mt-2"
             onClick={handleOnboardingSubmit}
             loading={loading}
+            disabled={!isFormValid}
           >
             Создать профиль и войти
             <ArrowRight size={18} />

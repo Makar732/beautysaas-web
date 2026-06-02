@@ -22,6 +22,11 @@ const DEFAULT_MASTER: Master = {
   phone: '+7 900 123-45-67',
   telegram_chat_id: '',
   created_at: new Date().toISOString(),
+  workingHours: {
+    start: '09:00',
+    end: '21:00',
+  },
+  daysOff: [0], // воскресенье выходной по умолчанию
 };
 
 const DEFAULT_SERVICES: Service[] = [
@@ -69,7 +74,6 @@ function generateDemoBookings(): Booking[] {
   const services = DEFAULT_SERVICES;
   const statuses: Array<'pending' | 'confirmed'> = ['confirmed', 'confirmed', 'confirmed', 'pending'];
 
-  // Generate bookings for last 3 days, today, and next 3 days
   for (let dayOffset = -3; dayOffset <= 3; dayOffset++) {
     const date = new Date(today);
     date.setDate(date.getDate() + dayOffset);
@@ -109,7 +113,6 @@ function generateDemoBookings(): Booking[] {
   return bookings;
 }
 
-// Initialize default data if empty
 function initializeDefaultData() {
   const masters = getMasters();
   if (masters.length === 0) {
@@ -249,10 +252,10 @@ export function initStorage() {
   initializeDefaultData();
 }
 
+/*
 // ============================================================
 // SUPABASE ADAPTER (закомментирован — активируйте при добавлении ключей)
 // ============================================================
-/*
 import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = 'YOUR_SUPABASE_URL';

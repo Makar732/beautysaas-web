@@ -11,19 +11,20 @@ import { sendTelegramNotification } from '../lib/telegram';
 import { Master, Service, Booking } from '../types';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
+import { PhoneInput, isPhoneComplete } from '../components/ui/PhoneInput';
 
 const DEMO_SLUG = 'irina-kozlova';
 const SLOT_INTERVAL = 30; // minutes
-const DAY_START = 9; // 9:00
-const DAY_END = 21; // 21:00
+const DEFAULT_DAY_START = 9;
+const DEFAULT_DAY_END = 21;
 
 function generateId() {
   return `booking-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-function generateTimeSlots(): string[] {
+function generateTimeSlots(startHour: number, endHour: number): string[] {
   const slots: string[] = [];
-  for (let h = DAY_START; h < DAY_END; h++) {
+  for (let h = startHour; h < endHour; h++) {
     for (let m = 0; m < 60; m += SLOT_INTERVAL) {
       slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
     }
@@ -107,7 +108,23 @@ export default function BookingPage() {
     }
   }, [master_slug]);
 
-  const allSlots = generateTimeSlots();
+  // Генерация слотов с учетом настроек мастера
+  const getMasterTimeSlots = (): string[] => {
+    if (!master?.workingHours) {
+      return generateTimeSlots(DEFAULT_DAY_START, DEFAULT_DAY_END);
+    }
+    const [startH] = master.workingHours.start.split(':').map(Number);
+    const [endH] = master.workingHours.end.split(':').map(Number);
+    return generateTimeSlots(startH, endH);
+  };
+
+  // Проверка на выходной
+  const isDayOff = (date: Date): boolean => {
+    if (!master?.daysOff) return false;
+    return master.daysOff.includes(date.getDay());
+  };
+
+  const allSlots = getMasterTimeSlots();
   const matrixDates = getMonthMatrix(calendarYear, calendarMonth);
 
   const getOccupiedSlots = (dateStr: string): string[] => {
@@ -135,7 +152,7 @@ export default function BookingPage() {
   const validateContacts = () => {
     const errs: { name?: string; phone?: string } = {};
     if (!clientName.trim() || clientName.trim().length < 2) errs.name = 'Введите ваше имя';
-    if (!clientPhone.trim() || clientPhone.replace(/\D/g, '').length < 10) errs.phone = 'Введите корректный номер телефона';
+    if (!isPhoneComplete(clientPhone)) errs.phone = 'Введите полный номер телефона';
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -179,18 +196,16 @@ export default function BookingPage() {
     await new Promise((r) => setTimeout(r, 800));
     setLoading(false);
     setStep('success');
-    // Refresh bookings list
     setExistingBookings(getBookingsByMasterId(master.id));
   };
 
   const stepIndex = { service: 0, datetime: 1, contacts: 2, success: 3 };
+  const isContactsValid = clientName.trim().length >= 2 && isPhoneComplete(clientPhone);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center p-4">
-      {/* Desktop: smartphone frame */}
       <div className="w-full max-w-sm">
 
-        {/* Redirect notice */}
         {redirected && (
           <div className="mb-4 bg-amber-50 border border-amber-200 rounded-2xl p-3 flex items-start gap-3">
             <AlertCircle size={16} className="text-amber-500 shrink-0 mt-0.5" />
@@ -203,16 +218,13 @@ export default function BookingPage() {
           </div>
         )}
 
-        {/* Phone frame */}
         <div className="bg-white rounded-[44px] shadow-2xl overflow-hidden border-4 border-gray-200 relative">
-          {/* Phone notch */}
           <div className="bg-gray-950 h-8 flex items-center justify-center relative">
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="w-24 h-5 bg-gray-900 rounded-b-2xl" />
             </div>
           </div>
 
-          {/* App header */}
           <div className="bg-gradient-to-br from-emerald-800 to-emerald-950 text-white px-5 py-4">
             <div className="flex items-center gap-2 mb-3">
               <Sparkles size={14} className="text-amber-400" />
@@ -225,7 +237,6 @@ export default function BookingPage() {
               </div>
             )}
 
-            {/* Step indicator */}
             {step !== 'success' && (
               <div className="flex items-center gap-1 mt-3">
                 {(['service', 'datetime', 'contacts'] as const).map((s, i) => (
@@ -251,10 +262,8 @@ export default function BookingPage() {
             )}
           </div>
 
-          {/* Content */}
           <div className="overflow-y-auto" style={{ maxHeight: '620px', minHeight: '420px' }}>
 
-            {/* STEP 1: Service selection */}
             {step === 'service' && (
               <div className="p-4">
                 <h2 className="font-bold text-gray-900 text-base mb-1">Выберите услугу</h2>
@@ -296,7 +305,6 @@ export default function BookingPage() {
               </div>
             )}
 
-            {/* STEP 2: Date & Time */}
             {step === 'datetime' && selectedService && (
               <div className="p-4">
                 <button
@@ -315,7 +323,6 @@ export default function BookingPage() {
                   <span className="font-bold text-emerald-600">{selectedService.price.toLocaleString('ru-RU')} ₽</span>
                 </div>
 
-                {/* Calendar */}
                 <div className="mb-4">
                   <div className="flex items-center justify-between mb-2">
                     <button
@@ -353,16 +360,17 @@ export default function BookingPage() {
                       const isPast = d < today;
                       const isSelected = selectedDate && dateToStr(d) === dateToStr(selectedDate);
                       const isToday = dateToStr(d) === dateToStr(today);
+                      const dayOff = isDayOff(d);
                       const dayOccupied = getOccupiedSlots(dateToStr(d));
                       const allSlotsOccupied = allSlots.every((s) => dayOccupied.includes(s));
 
                       return (
                         <button
                           key={i}
-                          disabled={isPast || allSlotsOccupied}
+                          disabled={isPast || allSlotsOccupied || dayOff}
                           onClick={() => { setSelectedDate(d); setSelectedTime(null); }}
                           className={`aspect-square flex items-center justify-center rounded-xl text-xs font-medium transition-all cursor-pointer ${
-                            isPast || allSlotsOccupied
+                            isPast || allSlotsOccupied || dayOff
                               ? 'text-gray-300 cursor-not-allowed'
                               : isSelected
                               ? 'bg-emerald-600 text-white font-bold'
@@ -378,54 +386,63 @@ export default function BookingPage() {
                   </div>
                 </div>
 
-                {/* Time Slots */}
                 {selectedDate && (
                   <div>
                     <p className="text-sm font-medium text-gray-900 mb-2 flex items-center gap-1">
                       <Calendar size={14} className="text-emerald-600" />
                       {formatDateRU(selectedDate)}
                     </p>
-                    <div className="grid grid-cols-3 gap-1.5 max-h-48 overflow-y-auto">
-                      {allSlots.map((slot) => {
-                        const occupied = isSlotOccupied(slot);
-                        const past = isPastSlot(slot);
-                        const disabled = occupied || past;
-                        return (
-                          <button
-                            key={slot}
-                            disabled={disabled}
-                            onClick={() => setSelectedTime(slot)}
-                            className={`py-2 rounded-xl text-xs font-medium transition-all cursor-pointer ${
-                              disabled
-                                ? 'bg-gray-100 text-gray-300 cursor-not-allowed line-through'
-                                : selectedTime === slot
-                                ? 'bg-emerald-600 text-white font-bold'
-                                : 'bg-gray-50 text-gray-700 hover:bg-emerald-50 hover:text-emerald-700 border border-gray-100'
-                            }`}
-                          >
-                            {slot}
-                          </button>
-                        );
-                      })}
-                    </div>
 
-                    {selectedTime && (
-                      <Button
-                        variant="primary"
-                        size="md"
-                        className="w-full mt-4"
-                        onClick={() => setStep('contacts')}
-                      >
-                        Продолжить
-                        <ArrowRight size={16} />
-                      </Button>
+                    {isDayOff(selectedDate) ? (
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center">
+                        <AlertCircle size={32} className="text-amber-500 mx-auto mb-2" />
+                        <p className="font-medium text-amber-800">У мастера выходной</p>
+                        <p className="text-xs text-amber-600 mt-1">Пожалуйста, выберите другой день</p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-3 gap-1.5 max-h-48 overflow-y-auto">
+                          {allSlots.map((slot) => {
+                            const occupied = isSlotOccupied(slot);
+                            const past = isPastSlot(slot);
+                            const disabled = occupied || past;
+                            return (
+                              <button
+                                key={slot}
+                                disabled={disabled}
+                                onClick={() => setSelectedTime(slot)}
+                                className={`py-2 rounded-xl text-xs font-medium transition-all cursor-pointer ${
+                                  disabled
+                                    ? 'bg-gray-100 text-gray-300 cursor-not-allowed line-through'
+                                    : selectedTime === slot
+                                    ? 'bg-emerald-600 text-white font-bold'
+                                    : 'bg-gray-50 text-gray-700 hover:bg-emerald-50 hover:text-emerald-700 border border-gray-100'
+                                }`}
+                              >
+                                {slot}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {selectedTime && (
+                          <Button
+                            variant="primary"
+                            size="md"
+                            className="w-full mt-4"
+                            onClick={() => setStep('contacts')}
+                          >
+                            Продолжить
+                            <ArrowRight size={16} />
+                          </Button>
+                        )}
+                      </>
                     )}
                   </div>
                 )}
               </div>
             )}
 
-            {/* STEP 3: Contacts */}
             {step === 'contacts' && (
               <div className="p-4">
                 <button
@@ -436,7 +453,6 @@ export default function BookingPage() {
                   Назад
                 </button>
 
-                {/* Summary */}
                 <div className="bg-emerald-50 rounded-2xl p-3 mb-4 space-y-1">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500">Услуга</span>
@@ -471,13 +487,12 @@ export default function BookingPage() {
                     <User size={14} className="absolute right-3 top-10 text-gray-400 pointer-events-none" />
                   </div>
                   <div className="relative">
-                    <Input
+                    <PhoneInput
                       label="Номер телефона"
-                      placeholder="+7 900 000-00-00"
-                      type="tel"
                       value={clientPhone}
-                      onChange={(e) => setClientPhone(e.target.value)}
+                      onChange={setClientPhone}
                       error={errors.phone}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none bg-white text-gray-900"
                     />
                     <Phone size={14} className="absolute right-3 top-10 text-gray-400 pointer-events-none" />
                   </div>
@@ -489,6 +504,7 @@ export default function BookingPage() {
                   className="w-full mt-4"
                   onClick={handleSubmit}
                   loading={loading}
+                  disabled={!isContactsValid}
                 >
                   {loading ? 'Отправляем...' : 'Записаться'}
                   {!loading && <ArrowRight size={16} />}
@@ -500,10 +516,9 @@ export default function BookingPage() {
               </div>
             )}
 
-            {/* STEP 4: Success */}
             {step === 'success' && createdBooking && (
               <div className="p-6 text-center flex flex-col items-center">
-                <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mb-4 animate-[bounceIn_0.5s_ease-out]">
+                <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mb-4">
                   <Check size={40} className="text-emerald-600" />
                 </div>
 
@@ -566,13 +581,11 @@ export default function BookingPage() {
             )}
           </div>
 
-          {/* Phone home button area */}
           <div className="bg-gray-50 h-8 flex items-center justify-center">
             <div className="w-28 h-1 bg-gray-300 rounded-full" />
           </div>
         </div>
 
-        {/* Powered by */}
         <div className="text-center mt-4">
           <a href="#/" className="inline-flex items-center gap-1.5 text-gray-400 hover:text-gray-600 transition-colors text-xs">
             <Sparkles size={12} className="text-amber-400" />

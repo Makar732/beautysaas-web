@@ -7,6 +7,11 @@ export interface Master {
   telegram_bot_token?: string;
   avatar?: string;
   created_at: string;
+  workingHours?: {
+    start: string; // формат "09:00"
+    end: string;   // формат "21:00"
+  };
+  daysOff?: number[]; // 0=Вс, 1=Пн, 2=Вт, 3=Ср, 4=Чт, 5=Пт, 6=Сб
 }
 
 export interface Service {
@@ -39,4 +44,9 @@ export interface AppUser {
   isGuest: boolean;
   telegram_chat_id?: string;
   telegram_bot_token?: string;
+  workingHours?: {
+    start: string;
+    end: string;
+  };
+  daysOff?: number[];
 }

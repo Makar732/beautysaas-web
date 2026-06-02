@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Calendar, Package, Settings, LogOut, Sparkles, Plus, Trash2, Edit3,
   Copy, Check, ExternalLink, Bell, Clock, User, Phone, DollarSign,
-  ChevronLeft, ChevronRight, Save, TrendingUp, Users
+  ChevronLeft, ChevronRight, Save, TrendingUp,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -15,6 +15,7 @@ import { Booking, Service } from '../types';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
+import { PhoneInput, isPhoneComplete } from '../components/ui/PhoneInput';
 
 type Tab = 'calendar' | 'services' | 'settings';
 
@@ -29,6 +30,7 @@ const STATUS_LABELS: Record<string, string> = {
   pending: 'В ожидании',
   cancelled: 'Отменена',
 };
+const WEEK_DAYS = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
 
 function generateId() {
   return `id-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -70,6 +72,14 @@ export default function DashboardPage() {
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [mobileView, setMobileView] = useState<'week' | 'day'>('week');
 
+  // Настройки мастера
+  const [workStart, setWorkStart] = useState('09:00');
+  const [workEnd, setWorkEnd] = useState('21:00');
+  const [daysOff, setDaysOff] = useState<number[]>([]);
+
+  // Месяц для динамической выручки
+  const [revenueMonth, setRevenueMonth] = useState(new Date());
+
   // Booking form state
   const [bookingForm, setBookingForm] = useState({
     clientName: '', clientPhone: '', serviceId: '', date: '', time: '',
@@ -85,6 +95,13 @@ export default function DashboardPage() {
     // Load settings
     const master = getMasterById(user.id);
     if (master?.telegram_chat_id) setTelegramChatId(master.telegram_chat_id);
+    if (master?.workingHours) {
+      setWorkStart(master.workingHours.start);
+      setWorkEnd(master.workingHours.end);
+    }
+    if (master?.daysOff) {
+      setDaysOff(master.daysOff);
+    }
   }, [user, currentDate]);
 
   const loadData = () => {
@@ -95,7 +112,7 @@ export default function DashboardPage() {
 
   const masterId = user?.id || '';
   const masterSlug = user?.slug || '';
-  const bookingLink = `${window.location.origin}/book/${masterSlug}`;
+  const bookingLink = `${window.location.origin}/#/book/${masterSlug}`;
 
   const copyLink = async () => {
     await navigator.clipboard.writeText(bookingLink);
@@ -126,7 +143,7 @@ export default function DashboardPage() {
   };
 
   const handleAddBooking = () => {
-    if (!bookingForm.clientName || !bookingForm.clientPhone || !bookingForm.serviceId) return;
+    if (!bookingForm.clientName || !isPhoneComplete(bookingForm.clientPhone) || !bookingForm.serviceId) return;
     const service = services.find((s) => s.id === bookingForm.serviceId);
     const newBooking: Booking = {
       id: generateId(),
@@ -183,12 +200,26 @@ export default function DashboardPage() {
     loadData();
   };
 
+  const toggleDayOff = (day: number) => {
+    setDaysOff(prev =>
+      prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
+    );
+  };
+
   const handleSaveSettings = () => {
     if (!user) return;
-    updateUser({ ...user, telegram_chat_id: telegramChatId });
+    const updatedUser = {
+      ...user,
+      telegram_chat_id: telegramChatId,
+      workingHours: { start: workStart, end: workEnd },
+      daysOff,
+    };
+    updateUser(updatedUser);
     upsertMaster({
       id: user.id, name: user.name, slug: user.slug, phone: user.phone,
       telegram_chat_id: telegramChatId, created_at: new Date().toISOString(),
+      workingHours: { start: workStart, end: workEnd },
+      daysOff,
     });
     setSettingsSaved(true);
     setTimeout(() => setSettingsSaved(false), 2000);
@@ -199,6 +230,32 @@ export default function DashboardPage() {
     navigate('/');
   };
 
+  // Динамический расчет выручки за выбранный месяц
+  const calculateMonthRevenue = () => {
+    const year = revenueMonth.getFullYear();
+    const month = revenueMonth.getMonth();
+    
+    return bookings
+      .filter(b => {
+        const bDate = new Date(b.date);
+        return bDate.getFullYear() === year && bDate.getMonth() === month && b.status === 'confirmed';
+      })
+      .reduce((sum, b) => {
+        const svc = services.find(s => s.id === b.service_id);
+        return sum + (svc?.price || 0);
+      }, 0);
+  };
+
+  const monthRevenue = calculateMonthRevenue();
+
+  const goToPrevMonth = () => {
+    setRevenueMonth(new Date(revenueMonth.getFullYear(), revenueMonth.getMonth() - 1));
+  };
+
+  const goToNextMonth = () => {
+    setRevenueMonth(new Date(revenueMonth.getFullYear(), revenueMonth.getMonth() + 1));
+  };
+
   // Stats
   const today = formatDate(new Date());
   const todayBookings = bookings.filter((b) => b.date === today && b.status !== 'cancelled');
@@ -207,10 +264,8 @@ export default function DashboardPage() {
     return sum + (svc?.price || 0);
   }, 0);
   const monthBookings = bookings.filter((b) => b.date.startsWith(new Date().toISOString().slice(0, 7)));
-  const monthRevenue = monthBookings.reduce((sum, b) => {
-    const svc = services.find((s) => s.id === b.service_id);
-    return sum + (svc?.price || 0);
-  }, 0);
+
+  const isAddBookingValid = bookingForm.clientName.trim() && isPhoneComplete(bookingForm.clientPhone) && bookingForm.serviceId;
 
   if (!user) return null;
 
@@ -323,7 +378,7 @@ export default function DashboardPage() {
                 {activeTab === 'settings' && 'Настройки профиля'}
               </h1>
               <p className="text-gray-500 text-sm mt-1">
-                {activeTab === 'calendar' && `${monthBookings.length} записей в этом месяце · ${monthRevenue.toLocaleString('ru-RU')} ₽`}
+                {activeTab === 'calendar' && `${monthBookings.length} записей в этом месяце`}
                 {activeTab === 'services' && `${services.length} услуг в вашем прайсе`}
                 {activeTab === 'settings' && 'Управляйте профилем и уведомлениями'}
               </p>
@@ -352,22 +407,47 @@ export default function DashboardPage() {
           {/* Stats Row */}
           {activeTab === 'calendar' && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
-              {[
-                { label: 'Сегодня записей', value: todayBookings.length, icon: Calendar, color: 'text-emerald-600' },
-                { label: 'Выручка сегодня', value: `${todayRevenue.toLocaleString('ru-RU')} ₽`, icon: DollarSign, color: 'text-emerald-600' },
-                { label: 'За месяц', value: `${monthRevenue.toLocaleString('ru-RU')} ₽`, icon: TrendingUp, color: 'text-blue-600' },
-                { label: 'Всего записей', value: monthBookings.length, icon: Users, color: 'text-purple-600' },
-              ].map((stat) => (
-                <div key={stat.label} className="bg-gray-50 rounded-xl p-3 flex items-center gap-3">
-                  <div className={`${stat.color} bg-current/10 p-2 rounded-lg`}>
-                    <stat.icon size={14} className={stat.color} />
+              <div className="bg-gray-50 rounded-xl p-3 flex items-center gap-3">
+                <div className="text-emerald-600 bg-emerald-100 p-2 rounded-lg">
+                  <Calendar size={14} />
+                </div>
+                <div>
+                  <p className="font-bold text-gray-900 text-sm">{todayBookings.length}</p>
+                  <p className="text-xs text-gray-500">Сегодня</p>
+                </div>
+              </div>
+
+              <div className="bg-gray-50 rounded-xl p-3 flex items-center gap-3">
+                <div className="text-emerald-600 bg-emerald-100 p-2 rounded-lg">
+                  <DollarSign size={14} />
+                </div>
+                <div>
+                  <p className="font-bold text-gray-900 text-sm">{todayRevenue.toLocaleString('ru-RU')} ₽</p>
+                  <p className="text-xs text-gray-500">Выручка</p>
+                </div>
+              </div>
+
+              {/* Динамическая карточка за месяц */}
+              <div className="bg-gray-50 rounded-xl p-3 sm:col-span-2">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp size={14} className="text-blue-600" />
+                    <p className="text-xs text-gray-500">За месяц</p>
                   </div>
-                  <div>
-                    <p className="font-bold text-gray-900 text-sm">{stat.value}</p>
-                    <p className="text-xs text-gray-500">{stat.label}</p>
+                  <div className="flex items-center gap-1">
+                    <button onClick={goToPrevMonth} className="p-1 hover:bg-gray-200 rounded transition-colors">
+                      <ChevronLeft size={14} />
+                    </button>
+                    <span className="text-xs text-gray-600 px-2">
+                      {revenueMonth.toLocaleDateString('ru-RU', { month: 'short', year: 'numeric' })}
+                    </span>
+                    <button onClick={goToNextMonth} className="p-1 hover:bg-gray-200 rounded transition-colors">
+                      <ChevronRight size={14} />
+                    </button>
                   </div>
                 </div>
-              ))}
+                <p className="font-bold text-gray-900 text-lg">{monthRevenue.toLocaleString('ru-RU')} ₽</p>
+              </div>
             </div>
           )}
         </div>
@@ -720,6 +800,54 @@ export default function DashboardPage() {
                 </div>
               </div>
 
+              {/* Время работы */}
+              <div className="bg-white rounded-2xl border border-gray-200 p-6">
+                <h2 className="font-bold text-gray-900 text-lg mb-4">Время работы</h2>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 block mb-2">Начало дня</label>
+                    <input
+                      type="time"
+                      value={workStart}
+                      onChange={(e) => setWorkStart(e.target.value)}
+                      className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 block mb-2">Конец дня</label>
+                    <input
+                      type="time"
+                      value={workEnd}
+                      onChange={(e) => setWorkEnd(e.target.value)}
+                      className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Выходные дни */}
+              <div className="bg-white rounded-2xl border border-gray-200 p-6">
+                <h2 className="font-bold text-gray-900 text-lg mb-4">Выходные дни</h2>
+                <p className="text-sm text-gray-500 mb-4">
+                  Отметьте дни, когда вы не принимаете клиентов
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {WEEK_DAYS.map((day, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => toggleDayOff(idx)}
+                      className={`px-4 py-2 rounded-xl font-medium transition-all ${
+                        daysOff.includes(idx)
+                          ? 'bg-red-600 text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {day}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Telegram Notifications */}
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 <div className="flex items-center gap-2 mb-1">
@@ -778,12 +906,11 @@ export default function DashboardPage() {
             value={bookingForm.clientName}
             onChange={(e) => setBookingForm((f) => ({ ...f, clientName: e.target.value }))}
           />
-          <Input
+          <PhoneInput
             label="Телефон клиента"
-            placeholder="+7 900 000-00-00"
-            type="tel"
             value={bookingForm.clientPhone}
-            onChange={(e) => setBookingForm((f) => ({ ...f, clientPhone: e.target.value }))}
+            onChange={(value) => setBookingForm((f) => ({ ...f, clientPhone: value }))}
+            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none bg-white text-gray-900"
           />
           <div>
             <label className="text-sm font-medium text-gray-700 block mb-1">Услуга</label>
@@ -817,7 +944,7 @@ export default function DashboardPage() {
             <Button variant="ghost" className="flex-1" onClick={() => setShowAddBookingModal(false)}>
               Отмена
             </Button>
-            <Button variant="primary" className="flex-1" onClick={handleAddBooking}>
+            <Button variant="primary" className="flex-1" onClick={handleAddBooking} disabled={!isAddBookingValid}>
               <Plus size={16} />
               Добавить
             </Button>
