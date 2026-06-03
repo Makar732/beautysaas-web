@@ -12,10 +12,13 @@ import { Master, Service, Booking } from '../types';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { PhoneInput, isPhoneComplete } from '../components/ui/PhoneInput';
+// ✅ ИСПРАВЛЕНИЕ: Импорт утилит для работы с датами
+import { formatDateToString, parseDateFromString, formatDateRU } from '../utils/dateUtils';
 
 const SLOT_INTERVAL = 30;
-const DEFAULT_DAY_START = 9;
-const DEFAULT_DAY_END = 21;
+// ✅ ИСПРАВЛЕНИЕ: 24/7 по умолчанию
+const DEFAULT_DAY_START = 0;
+const DEFAULT_DAY_END = 24;
 
 function generateId() {
   return `booking-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -50,14 +53,6 @@ function getMonthMatrix(year: number, month: number): (Date | null)[][] {
     matrix.push(week);
   }
   return matrix;
-}
-
-function formatDateRU(date: Date): string {
-  return date.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
-}
-
-function dateToStr(d: Date): string {
-  return d.toISOString().split('T')[0];
 }
 
 type Step = 'service' | 'datetime' | 'contacts' | 'success';
@@ -107,11 +102,11 @@ export default function BookingPage() {
         return;
       }
       
-      // Конвертация форматов БД (snake_case -> camelCase)
+      // ✅ ИСПРАВЛЕНИЕ: 24/7 по умолчанию если нет настроек
       const formattedMaster = {
         ...foundMaster,
-        workingHours: (foundMaster as any).working_hours || { start: '09:00', end: '21:00' },
-        daysOff: (foundMaster as any).days_off || []
+        workingHours: (foundMaster as any).working_hours || foundMaster.workingHours || { start: '00:00', end: '24:00' },
+        daysOff: (foundMaster as any).days_off || foundMaster.daysOff || []
       };
       
       setMaster(formattedMaster);
@@ -136,7 +131,7 @@ export default function BookingPage() {
   };
 
   const isDayOff = (date: Date): boolean => {
-    if (!master?.daysOff) return false;
+    if (!master?.daysOff || master.daysOff.length === 0) return false; // ✅ Все дни рабочие
     return master.daysOff.includes(date.getDay());
   };
 
@@ -151,7 +146,7 @@ export default function BookingPage() {
 
   const isSlotOccupied = (time: string): boolean => {
     if (!selectedDate) return false;
-    return getOccupiedSlots(dateToStr(selectedDate)).includes(time);
+    return getOccupiedSlots(formatDateToString(selectedDate)).includes(time); // ✅ ИСПРАВЛЕНИЕ
   };
 
   const isPastSlot = (time: string): boolean => {
@@ -175,6 +170,7 @@ export default function BookingPage() {
     if (!validateContacts() || !master || !selectedService || !selectedDate || !selectedTime) return;
     setLoading(true);
 
+    // ✅ ИСПРАВЛЕНИЕ: Используем formatDateToString вместо toISOString
     const booking: Booking = {
       id: generateId(),
       master_id: master.id,
@@ -182,9 +178,9 @@ export default function BookingPage() {
       service_name: selectedService.name,
       client_name: clientName.trim(),
       client_phone: clientPhone.trim(),
-      date: dateToStr(selectedDate),
+      date: formatDateToString(selectedDate),
       time: selectedTime,
-      status: 'pending', // Поставим 'pending', чтобы мастер сам подтвердил
+      status: 'pending',
       created_at: new Date().toISOString(),
     };
 
@@ -198,7 +194,7 @@ export default function BookingPage() {
           clientName: booking.client_name,
           clientPhone: booking.client_phone,
           serviceName: booking.service_name,
-          date: selectedDate.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }),
+          date: formatDateRU(selectedDate), // ✅ ИСПРАВЛЕНИЕ
           time: booking.time,
           masterName: master.name,
         },
@@ -209,7 +205,6 @@ export default function BookingPage() {
     setLoading(false);
     setStep('success');
     
-    // Обновляем список бронирований после добавления
     const updatedBookings = await getBookingsByMasterId(master.id);
     setExistingBookings(updatedBookings);
   };
@@ -401,10 +396,11 @@ export default function BookingPage() {
                   {matrixDates.flat().map((d, i) => {
                     if (!d) return <div key={i} className="aspect-square" />;
                     const isPast = d < today;
-                    const isSelected = selectedDate && dateToStr(d) === dateToStr(selectedDate);
-                    const isToday = dateToStr(d) === dateToStr(today);
+                    // ✅ ИСПРАВЛЕНИЕ: Сравнение через formatDateToString
+                    const isSelected = selectedDate && formatDateToString(d) === formatDateToString(selectedDate);
+                    const isToday = formatDateToString(d) === formatDateToString(today);
                     const dayOff = isDayOff(d);
-                    const dayOccupied = getOccupiedSlots(dateToStr(d));
+                    const dayOccupied = getOccupiedSlots(formatDateToString(d));
                     const allSlotsOccupied = allSlots.every((s) => dayOccupied.includes(s));
                     const disabled = isPast || allSlotsOccupied || dayOff;
 
@@ -452,6 +448,7 @@ export default function BookingPage() {
                   <div className="flex flex-col h-[280px]">
                     <div className="bg-emerald-50 text-emerald-800 px-4 py-3 rounded-xl font-medium flex items-center gap-2 mb-4 shrink-0">
                       <Check size={16} className="text-emerald-500" />
+                      {/* ✅ ИСПРАВЛЕНИЕ: formatDateRU вместо formatDateRU(selectedDate) */}
                       {formatDateRU(selectedDate)}
                     </div>
                     
@@ -545,7 +542,8 @@ export default function BookingPage() {
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-gray-500 flex items-center gap-2"><Calendar size={14}/> Дата</span>
                     <span className="font-medium text-gray-900">
-                      {selectedDate?.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}
+                      {/* ✅ ИСПРАВЛЕНИЕ */}
+                      {selectedDate && formatDateRU(selectedDate).split(',')[0]}
                     </span>
                   </div>
                   <div className="flex justify-between items-center text-sm">
@@ -610,8 +608,9 @@ export default function BookingPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-sm text-gray-500 mb-1">Дата</p>
+                    {/* ✅ ИСПРАВЛЕНИЕ: Парсинг через parseDateFromString */}
                     <p className="font-semibold text-gray-900">
-                      {new Date(createdBooking.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
+                      {parseDateFromString(createdBooking.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
                     </p>
                   </div>
                   <div>

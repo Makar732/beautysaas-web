@@ -44,26 +44,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const slug = generateSlug(name);
     const id = `master-${slug}-${Date.now()}`;
 
+    // ✅ ИСПРАВЛЕНИЕ: Единый объект со всеми полями
     const newUser: AppUser = {
       id,
       name,
       phone,
       slug,
       isGuest: false,
+      telegram_chat_id: '',
+      telegram_bot_token: '',
+      workingHours: {
+        start: '00:00', // ✅ 24/7 по умолчанию
+        end: '24:00',
+      },
+      daysOff: [], // ✅ Все дни рабочие
     };
 
     const master = {
-      id,
-      name,
-      slug,
-      phone,
-      telegram_chat_id: '',
+      id: newUser.id,
+      name: newUser.name,
+      slug: newUser.slug,
+      phone: newUser.phone,
+      telegram_chat_id: newUser.telegram_chat_id || '',
+      telegram_bot_token: newUser.telegram_bot_token || '',
+      workingHours: newUser.workingHours!,
+      daysOff: newUser.daysOff!,
       created_at: new Date().toISOString(),
-      workingHours: {
-        start: '09:00',
-        end: '21:00',
-      },
-      daysOff: [], 
     };
 
     // ЖДЁМ сохранения в базу данных!
@@ -90,9 +96,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       name: updated.name,
       slug: updated.slug,
       phone: updated.phone,
-      telegram_chat_id: updated.telegram_chat_id,
-      workingHours: updated.workingHours,
-      daysOff: updated.daysOff,
+      telegram_chat_id: updated.telegram_chat_id || '',
+      telegram_bot_token: updated.telegram_bot_token || '',
+      workingHours: updated.workingHours || { start: '00:00', end: '24:00' },
+      daysOff: updated.daysOff || [],
       created_at: new Date().toISOString(),
     });
 

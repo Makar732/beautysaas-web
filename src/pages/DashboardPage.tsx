@@ -16,10 +16,12 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { PhoneInput, isPhoneComplete } from '../components/ui/PhoneInput';
+// ✅ ИСПРАВЛЕНИЕ 1: импортируем утилиты дат
+import { formatDateToString, parseDateFromString } from '../utils/dateUtils';
 
 type Tab = 'calendar' | 'services' | 'settings';
 
-const HOURS = Array.from({ length: 13 }, (_, i) => i + 9); // 9 to 21
+const HOURS = Array.from({ length: 13 }, (_, i) => i + 9);
 const STATUS_COLORS: Record<string, string> = {
   confirmed: 'bg-emerald-100 border-emerald-400 text-emerald-900',
   pending: 'bg-amber-100 border-amber-400 text-amber-900',
@@ -36,8 +38,9 @@ function generateId() {
   return `id-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-function formatDate(d: Date) {
-  return d.toISOString().split('T')[0];
+// ✅ ИСПРАВЛЕНИЕ 2: formatDate теперь без UTC сдвига
+function formatDate(d: Date): string {
+  return formatDateToString(d);
 }
 
 function getWeekDates(baseDate: Date) {
@@ -73,25 +76,21 @@ export default function DashboardPage() {
   const [mobileView, setMobileView] = useState<'week' | 'day'>('week');
   const [isLoading, setIsLoading] = useState(true);
 
-  // Настройки мастера
   const [workStart, setWorkStart] = useState('09:00');
   const [workEnd, setWorkEnd] = useState('21:00');
   const [daysOff, setDaysOff] = useState<number[]>([]);
 
-  // Месяц для динамической выручки
   const [revenueMonth, setRevenueMonth] = useState(new Date());
 
-  // Booking form state
   const [bookingForm, setBookingForm] = useState({
     clientName: '', clientPhone: '', serviceId: '', date: '', time: '',
   });
-  // Service form state
   const [serviceForm, setServiceForm] = useState({ name: '', price: '', duration: '' });
 
   useEffect(() => {
-    if (!user) { 
-      navigate('/login'); 
-      return; 
+    if (!user) {
+      navigate('/login');
+      return;
     }
     const week = getWeekDates(currentDate);
     setWeekDates(week);
@@ -101,29 +100,23 @@ export default function DashboardPage() {
   const loadData = async () => {
     if (!user) return;
     setIsLoading(true);
-    
-    // Загружаем данные из облака асинхронно
+
     const fetchedBookings = await getBookingsByMasterId(user.id);
     const fetchedServices = await getServicesByMasterId(user.id);
     const master = await getMasterById(user.id);
-    
+
     setBookings(fetchedBookings);
     setServices(fetchedServices);
 
     if (master) {
       if (master.telegram_chat_id) setTelegramChatId(master.telegram_chat_id);
-      
-      // Нам возвращается змеиный_кейс из БД или camelCase из локального объекта
       const workHours = (master as any).working_hours || master.workingHours;
       if (workHours) {
         setWorkStart(workHours.start);
         setWorkEnd(workHours.end);
       }
-      
       const offDays = (master as any).days_off || master.daysOff;
-      if (offDays) {
-        setDaysOff(offDays);
-      }
+      if (offDays) setDaysOff(offDays);
     }
     setIsLoading(false);
   };
@@ -163,7 +156,7 @@ export default function DashboardPage() {
   const handleAddBooking = async () => {
     if (!bookingForm.clientName || !isPhoneComplete(bookingForm.clientPhone) || !bookingForm.serviceId) return;
     const service = services.find((s) => s.id === bookingForm.serviceId);
-    
+
     const newBooking: Booking = {
       id: generateId(),
       master_id: masterId,
@@ -176,7 +169,7 @@ export default function DashboardPage() {
       status: 'confirmed',
       created_at: new Date().toISOString(),
     };
-    
+
     await addBooking(newBooking);
     await loadData();
     setShowAddBookingModal(false);
@@ -193,12 +186,9 @@ export default function DashboardPage() {
     setShowBookingDetailModal(false);
   };
 
-  // ========================================
-  // ✅ ИСПРАВЛЕНИЕ: БАГ С УСЛУГАМИ
-  // ========================================
   const handleSaveService = async () => {
     if (!serviceForm.name || !serviceForm.price || !serviceForm.duration) return;
-    
+
     try {
       const service: Service = {
         id: editingService?.id || generateId(),
@@ -207,22 +197,12 @@ export default function DashboardPage() {
         price: Number(serviceForm.price),
         duration: Number(serviceForm.duration),
       };
-      
-      console.log('🔄 Сохраняем услугу:', service);
-      
+
       await upsertService(service);
-      
-      console.log('✅ Услуга сохранена, перезагружаем список...');
-      
-      // Обновляем список услуг из БД
       await loadData();
-      
-      // Закрываем модалку и сбрасываем форму
       setShowEditServiceModal(false);
       setEditingService(null);
       setServiceForm({ name: '', price: '', duration: '' });
-      
-      console.log('✅ Услуга добавлена и отображена!');
     } catch (error) {
       console.error('❌ Ошибка при сохранении услуги:', error);
       alert('Не удалось сохранить услугу. Проверьте консоль.');
@@ -254,7 +234,6 @@ export default function DashboardPage() {
       workingHours: { start: workStart, end: workEnd },
       daysOff,
     };
-    
     await updateUser(updatedUser);
     setSettingsSaved(true);
     setTimeout(() => setSettingsSaved(false), 2000);
@@ -265,16 +244,13 @@ export default function DashboardPage() {
     navigate('/');
   };
 
-  // Динамический расчет выручки за выбранный месяц
+  // ✅ ИСПРАВЛЕНИЕ 3: выручка за месяц через сравнение строк, без new Date()
   const calculateMonthRevenue = () => {
     const year = revenueMonth.getFullYear();
-    const month = revenueMonth.getMonth();
-    
+    const month = String(revenueMonth.getMonth() + 1).padStart(2, '0');
+    const prefix = `${year}-${month}`;
     return bookings
-      .filter(b => {
-        const bDate = new Date(b.date);
-        return bDate.getFullYear() === year && bDate.getMonth() === month && b.status === 'confirmed';
-      })
+      .filter(b => b.date.startsWith(prefix) && b.status === 'confirmed')
       .reduce((sum, b) => {
         const svc = services.find(s => s.id === b.service_id);
         return sum + (svc?.price || 0);
@@ -297,7 +273,11 @@ export default function DashboardPage() {
     const svc = services.find((s) => s.id === b.service_id);
     return sum + (svc?.price || 0);
   }, 0);
-  const monthBookings = bookings.filter((b) => b.date.startsWith(new Date().toISOString().slice(0, 7)));
+
+  // ✅ ИСПРАВЛЕНИЕ 4: monthBookings без UTC сдвига
+  const now = new Date();
+  const currentMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const monthBookings = bookings.filter((b) => b.date.startsWith(currentMonthPrefix));
 
   const isAddBookingValid = bookingForm.clientName.trim() && isPhoneComplete(bookingForm.clientPhone) && bookingForm.serviceId;
 
@@ -344,7 +324,6 @@ export default function DashboardPage() {
           ))}
         </nav>
 
-        {/* Quick Stats */}
         <div className="p-4 border-t border-white/8 space-y-3">
           <div className="bg-white/5 rounded-xl p-3">
             <p className="text-xs text-gray-400 mb-1">Сегодня</p>
@@ -383,11 +362,10 @@ export default function DashboardPage() {
 
       {/* MAIN CONTENT */}
       <main className="flex-1 overflow-auto pb-20 lg:pb-0 relative">
-        
-        {/* Индикатор загрузки */}
+
         {isLoading && (
           <div className="absolute inset-0 bg-white/60 z-50 flex items-center justify-center backdrop-blur-sm">
-             <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+            <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
           </div>
         )}
 
@@ -441,7 +419,6 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* Stats Row */}
           {activeTab === 'calendar' && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
               <div className="bg-gray-50 rounded-xl p-3 flex items-center gap-3">
@@ -464,7 +441,6 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Динамическая карточка за месяц */}
               <div className="bg-gray-50 rounded-xl p-3 sm:col-span-2">
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-2">
@@ -490,10 +466,10 @@ export default function DashboardPage() {
         </div>
 
         <div className="p-4 lg:p-8">
-          {/* ===== CALENDAR TAB ===== */}
+
+          {/* CALENDAR TAB */}
           {activeTab === 'calendar' && (
             <div>
-              {/* Week Navigation */}
               <div className="flex items-center justify-between mb-4">
                 <button
                   onClick={() => { const d = new Date(currentDate); d.setDate(d.getDate() - 7); setCurrentDate(d); }}
@@ -521,7 +497,6 @@ export default function DashboardPage() {
                 </button>
               </div>
 
-              {/* Mobile toggle */}
               <div className="flex lg:hidden gap-2 mb-4">
                 <button
                   onClick={() => setMobileView('week')}
@@ -537,7 +512,6 @@ export default function DashboardPage() {
                 </button>
               </div>
 
-              {/* Day selector (mobile) */}
               {mobileView === 'day' && (
                 <div className="flex gap-1 mb-4 overflow-x-auto pb-1 lg:hidden">
                   {weekDates.map((d, i) => {
@@ -560,9 +534,8 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {/* Calendar Grid - Desktop (week) */}
+              {/* Desktop calendar */}
               <div className="hidden lg:block bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-                {/* Day headers */}
                 <div className="grid border-b border-gray-100" style={{ gridTemplateColumns: '64px repeat(7, 1fr)' }}>
                   <div className="p-3 text-xs text-gray-400 text-center font-medium">Время</div>
                   {weekDates.map((d, i) => {
@@ -587,7 +560,6 @@ export default function DashboardPage() {
                   })}
                 </div>
 
-                {/* Hours */}
                 <div className="overflow-y-auto max-h-[600px]">
                   {HOURS.map((hour) => (
                     <div
@@ -631,7 +603,7 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Mobile Day View */}
+              {/* Mobile views */}
               <div className="lg:hidden">
                 {mobileView === 'day' ? (
                   <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
@@ -679,7 +651,6 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 ) : (
-                  /* Mobile week overview */
                   <div className="space-y-3">
                     {weekDates.map((d, i) => {
                       const dayBks = getDayBookings(d);
@@ -726,7 +697,7 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* ===== SERVICES TAB ===== */}
+          {/* SERVICES TAB */}
           {activeTab === 'services' && (
             <div>
               {services.length === 0 ? (
@@ -778,10 +749,9 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* ===== SETTINGS TAB ===== */}
+          {/* SETTINGS TAB */}
           {activeTab === 'settings' && (
             <div className="max-w-2xl space-y-6">
-              {/* Booking Link */}
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 <h2 className="font-bold text-gray-900 text-lg mb-1">Ваша ссылка для записи</h2>
                 <p className="text-sm text-gray-500 mb-4">
@@ -809,7 +779,6 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Profile */}
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 <h2 className="font-bold text-gray-900 text-lg mb-4">Профиль</h2>
                 <div className="space-y-4">
@@ -837,9 +806,7 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* ========================================
-                  ✅ ИСПРАВЛЕНИЕ: БАГ С AM/PM
-                  ======================================== */}
+              {/* ✅ ИСПРАВЛЕНИЕ: 24-часовой select без AM/PM */}
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 <h2 className="font-bold text-gray-900 text-lg mb-4">Время работы</h2>
                 <div className="grid grid-cols-2 gap-4">
@@ -852,11 +819,7 @@ export default function DashboardPage() {
                     >
                       {Array.from({ length: 24 }, (_, h) => {
                         const hour = String(h).padStart(2, '0');
-                        return (
-                          <option key={hour} value={`${hour}:00`}>
-                            {hour}:00
-                          </option>
-                        );
+                        return <option key={hour} value={`${hour}:00`}>{hour}:00</option>;
                       })}
                     </select>
                   </div>
@@ -869,18 +832,13 @@ export default function DashboardPage() {
                     >
                       {Array.from({ length: 24 }, (_, h) => {
                         const hour = String(h).padStart(2, '0');
-                        return (
-                          <option key={hour} value={`${hour}:00`}>
-                            {hour}:00
-                          </option>
-                        );
+                        return <option key={hour} value={`${hour}:00`}>{hour}:00</option>;
                       })}
                     </select>
                   </div>
                 </div>
               </div>
 
-              {/* Выходные дни */}
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 <h2 className="font-bold text-gray-900 text-lg mb-4">Выходные дни</h2>
                 <p className="text-sm text-gray-500 mb-4">
@@ -903,7 +861,6 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Telegram Notifications */}
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 <div className="flex items-center gap-2 mb-1">
                   <Bell size={18} className="text-emerald-600" />
@@ -927,22 +884,15 @@ export default function DashboardPage() {
                     className={settingsSaved ? '!bg-emerald-500' : ''}
                   >
                     {settingsSaved ? (
-                      <>
-                        <Check size={16} />
-                        Сохранено!
-                      </>
+                      <><Check size={16} />Сохранено!</>
                     ) : (
-                      <>
-                        <Save size={16} />
-                        Сохранить настройки
-                      </>
+                      <><Save size={16} />Сохранить настройки</>
                     )}
                   </Button>
                 </div>
-
                 <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-xl">
                   <p className="text-xs text-amber-700">
-                    <strong>Примечание:</strong> Для работы уведомлений также необходимо добавить токен Telegram-бота
+                    <strong>Примечание:</strong> Для работы уведомлений необходимо добавить токен Telegram-бота
                     в файл <span className="font-mono">src/lib/storage.ts</span> (константа TELEGRAM_BOT_TOKEN).
                   </p>
                 </div>
@@ -952,7 +902,7 @@ export default function DashboardPage() {
         </div>
       </main>
 
-      {/* ===== ADD BOOKING MODAL ===== */}
+      {/* ADD BOOKING MODAL */}
       <Modal isOpen={showAddBookingModal} onClose={() => setShowAddBookingModal(false)} title="Добавить запись">
         <div className="space-y-4">
           <Input
@@ -975,9 +925,7 @@ export default function DashboardPage() {
               className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none bg-white text-gray-900"
             >
               {services.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} — {s.price} ₽
-                </option>
+                <option key={s.id} value={s.id}>{s.name} — {s.price} ₽</option>
               ))}
             </select>
           </div>
@@ -996,26 +944,26 @@ export default function DashboardPage() {
             />
           </div>
           <div className="flex gap-3 pt-2">
-            <Button variant="ghost" className="flex-1" onClick={() => setShowAddBookingModal(false)}>
-              Отмена
-            </Button>
+            <Button variant="ghost" className="flex-1" onClick={() => setShowAddBookingModal(false)}>Отмена</Button>
             <Button variant="primary" className="flex-1" onClick={handleAddBooking} disabled={!isAddBookingValid}>
-              <Plus size={16} />
-              Добавить
+              <Plus size={16} />Добавить
             </Button>
           </div>
         </div>
       </Modal>
 
-      {/* ===== BOOKING DETAIL MODAL ===== */}
+      {/* BOOKING DETAIL MODAL */}
       <Modal isOpen={showBookingDetailModal} onClose={() => setShowBookingDetailModal(false)} title="Детали записи">
         {selectedBooking && (
           <div className="space-y-4">
             <div className={`rounded-xl border-l-4 p-4 ${STATUS_COLORS[selectedBooking.status]}`}>
               <p className="font-bold text-lg">{selectedBooking.client_name}</p>
               <p className="text-sm opacity-80">{selectedBooking.service_name}</p>
+              {/* ✅ ИСПРАВЛЕНИЕ: parseDateFromString без UTC сдвига */}
               <p className="text-sm font-medium mt-1">
-                {new Date(selectedBooking.date).toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })} в {selectedBooking.time}
+                {parseDateFromString(selectedBooking.date).toLocaleDateString('ru-RU', {
+                  weekday: 'long', day: 'numeric', month: 'long'
+                })} в {selectedBooking.time}
               </p>
             </div>
 
@@ -1060,7 +1008,7 @@ export default function DashboardPage() {
         )}
       </Modal>
 
-      {/* ===== SERVICE MODAL ===== */}
+      {/* SERVICE MODAL */}
       <Modal
         isOpen={showEditServiceModal}
         onClose={() => setShowEditServiceModal(false)}
@@ -1088,9 +1036,7 @@ export default function DashboardPage() {
             onChange={(e) => setServiceForm((f) => ({ ...f, duration: e.target.value }))}
           />
           <div className="flex gap-3 pt-2">
-            <Button variant="ghost" className="flex-1" onClick={() => setShowEditServiceModal(false)}>
-              Отмена
-            </Button>
+            <Button variant="ghost" className="flex-1" onClick={() => setShowEditServiceModal(false)}>Отмена</Button>
             <Button variant="primary" className="flex-1" onClick={handleSaveService}>
               <Save size={16} />
               {editingService ? 'Сохранить' : 'Добавить'}
