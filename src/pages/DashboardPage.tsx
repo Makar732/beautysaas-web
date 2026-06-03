@@ -1,3 +1,4 @@
+// src/pages/DashboardPage.tsx
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -16,12 +17,24 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { PhoneInput, isPhoneComplete } from '../components/ui/PhoneInput';
-// ✅ ИСПРАВЛЕНИЕ 1: импортируем утилиты дат
 import { formatDateToString, parseDateFromString } from '../utils/dateUtils';
 
 type Tab = 'calendar' | 'services' | 'settings';
 
-const HOURS = Array.from({ length: 13 }, (_, i) => i + 9);
+// ШАГ СЕТКИ — 30 минут, строго совпадает с BookingPage
+const SLOT_MINUTES = 30;
+
+// Генерируем все слоты суток: 00:00, 00:30, 01:00 ... 23:30
+const ALL_TIME_SLOTS: string[] = (() => {
+  const slots: string[] = [];
+  for (let h = 0; h < 24; h++) {
+    for (let m = 0; m < 60; m += SLOT_MINUTES) {
+      slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+    }
+  }
+  return slots;
+})();
+
 const STATUS_COLORS: Record<string, string> = {
   confirmed: 'bg-emerald-100 border-emerald-400 text-emerald-900',
   pending: 'bg-amber-100 border-amber-400 text-amber-900',
@@ -38,7 +51,6 @@ function generateId() {
   return `id-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-// ✅ ИСПРАВЛЕНИЕ 2: formatDate теперь без UTC сдвига
 function formatDate(d: Date): string {
   return formatDateToString(d);
 }
@@ -55,6 +67,22 @@ function getWeekDates(baseDate: Date) {
 }
 
 const DAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+
+/**
+ * Сколько слотов по 30 минут занимает услуга.
+ * duration=100 → ceil(100/30)=4 слота
+ */
+function getSlotsCount(durationMinutes: number): number {
+  return Math.ceil(durationMinutes / SLOT_MINUTES);
+}
+
+/**
+ * Переводим время "HH:MM" в общее количество минут от полуночи.
+ */
+function timeToMinutes(time: string): number {
+  const [h, m] = time.split(':').map(Number);
+  return h * 60 + m;
+}
 
 export default function DashboardPage() {
   const { user, logout, updateUser } = useAuth();
@@ -131,12 +159,81 @@ export default function DashboardPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const getBookingsForDayHour = (date: Date, hour: number): Booking[] => {
+  /**
+   * Строим видимую сетку слотов на основе рабочих часов мастера.
+   * Если рабочие часы не заданы — показываем все 48 слотов (00:00–23:30).
+   * Шаг строго 30 минут — ни одна запись на "половинку" не пропадёт.
+   */
+  const getVisibleSlots = (): string[] => {
+    if (!workStart || !workEnd) return ALL_TIME_SLOTS;
+
+    const startMin = timeToMinutes(workStart);
+    const endMin = timeToMinutes(workEnd);
+
+    // Добавляем буфер: показываем на 1 час раньше начала и 2 часа позже конца,
+    // чтобы записи у границ рабочего времени точно были видны
+    const bufferBefore = 60;
+    const bufferAfter = 120;
+
+    const visibleStart = Math.max(0, startMin - bufferBefore);
+    const visibleEnd = Math.min(23 * 60 + 30, endMin + bufferAfter);
+
+    return ALL_TIME_SLOTS.filter(slot => {
+      const slotMin = timeToMinutes(slot);
+      return slotMin >= visibleStart && slotMin <= visibleEnd;
+    });
+  };
+
+  /**
+   * Возвращает записи, которые НАЧИНАЮТСЯ ровно в этот слот.
+   * Слоты продолжения (занятые из-за длительности) не возвращают запись повторно.
+   */
+  const getBookingsStartingAtSlot = (date: Date, slotTime: string): Booking[] => {
     const dateStr = formatDate(date);
-    const hourStr = String(hour).padStart(2, '0');
     return bookings.filter(
-      (b) => b.date === dateStr && b.time.startsWith(hourStr) && b.status !== 'cancelled'
+      (b) => b.date === dateStr && b.time === slotTime && b.status !== 'cancelled'
     );
+  };
+
+  /**
+   * Проверяет: является ли этот слот "продолжением" какой-то записи
+   * (т.е. запись началась раньше, но из-за длительности "захватывает" этот слот).
+   * Используется чтобы не рисовать пустую ячейку там, где карточка уже растянута.
+   */
+  const isSlotCoveredByEarlierBooking = (date: Date, slotTime: string): boolean => {
+    const dateStr = formatDate(date);
+    const slotMin = timeToMinutes(slotTime);
+
+    return bookings.some((b) => {
+      if (b.date !== dateStr || b.status === 'cancelled') return false;
+      if (b.time === slotTime) return false; // это начало — не "продолжение"
+
+      const bookingStartMin = timeToMinutes(b.time);
+      if (bookingStartMin >= slotMin) return false; // запись начинается позже
+
+      const service = services.find(s => s.id === b.service_id);
+      const duration = service?.duration ?? SLOT_MINUTES;
+      const slotsCount = getSlotsCount(duration);
+      const bookingEndMin = bookingStartMin + slotsCount * SLOT_MINUTES;
+
+      return slotMin < bookingEndMin;
+    });
+  };
+
+  /**
+   * Высота одного слота в пикселях — используется для растягивания карточек.
+   */
+  const SLOT_HEIGHT_PX = 48;
+
+  /**
+   * Вычисляет высоту карточки записи в пикселях на основе длительности услуги.
+   */
+  const getBookingCardHeight = (booking: Booking): number => {
+    const service = services.find(s => s.id === booking.service_id);
+    const duration = service?.duration ?? SLOT_MINUTES;
+    const slotsCount = getSlotsCount(duration);
+    // -4px — небольшой отступ чтобы карточки не сливались
+    return slotsCount * SLOT_HEIGHT_PX - 4;
   };
 
   const getDayBookings = (date: Date): Booking[] => {
@@ -144,11 +241,10 @@ export default function DashboardPage() {
     return bookings.filter((b) => b.date === dateStr && b.status !== 'cancelled');
   };
 
-  const handleCellClick = (date: Date, hour: number) => {
-    const time = `${String(hour).padStart(2, '0')}:00`;
+  const handleCellClick = (date: Date, slotTime: string) => {
     setBookingForm({
       clientName: '', clientPhone: '', serviceId: services[0]?.id || '',
-      date: formatDate(date), time,
+      date: formatDate(date), time: slotTime,
     });
     setShowAddBookingModal(true);
   };
@@ -244,7 +340,6 @@ export default function DashboardPage() {
     navigate('/');
   };
 
-  // ✅ ИСПРАВЛЕНИЕ 3: выручка за месяц через сравнение строк, без new Date()
   const calculateMonthRevenue = () => {
     const year = revenueMonth.getFullYear();
     const month = String(revenueMonth.getMonth() + 1).padStart(2, '0');
@@ -274,12 +369,14 @@ export default function DashboardPage() {
     return sum + (svc?.price || 0);
   }, 0);
 
-  // ✅ ИСПРАВЛЕНИЕ 4: monthBookings без UTC сдвига
   const now = new Date();
   const currentMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const monthBookings = bookings.filter((b) => b.date.startsWith(currentMonthPrefix));
 
   const isAddBookingValid = bookingForm.clientName.trim() && isPhoneComplete(bookingForm.clientPhone) && bookingForm.serviceId;
+
+  // Видимые слоты для текущих рабочих часов мастера
+  const visibleSlots = getVisibleSlots();
 
   if (!user) return null;
 
@@ -534,9 +631,10 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {/* Desktop calendar */}
+              {/* ===== DESKTOP CALENDAR ===== */}
               <div className="hidden lg:block bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-                <div className="grid border-b border-gray-100" style={{ gridTemplateColumns: '64px repeat(7, 1fr)' }}>
+                {/* Шапка с днями недели */}
+                <div className="grid border-b border-gray-100" style={{ gridTemplateColumns: '72px repeat(7, 1fr)' }}>
                   <div className="p-3 text-xs text-gray-400 text-center font-medium">Время</div>
                   {weekDates.map((d, i) => {
                     const isToday = formatDate(d) === today;
@@ -560,50 +658,105 @@ export default function DashboardPage() {
                   })}
                 </div>
 
+                {/* Тело сетки — 30-минутные строки */}
                 <div className="overflow-y-auto max-h-[600px]">
-                  {HOURS.map((hour) => (
-                    <div
-                      key={hour}
-                      className="grid border-b border-gray-50 hover:bg-gray-50/50 transition-colors min-h-[60px]"
-                      style={{ gridTemplateColumns: '64px repeat(7, 1fr)' }}
-                    >
-                      <div className="p-2 text-xs text-gray-400 font-mono text-right pr-3 pt-2 shrink-0">
-                        {String(hour).padStart(2, '0')}:00
-                      </div>
-                      {weekDates.map((d, di) => {
-                        const cellBookings = getBookingsForDayHour(d, hour);
-                        const isToday = formatDate(d) === today;
-                        return (
-                          <div
-                            key={di}
-                            onClick={() => handleCellClick(d, hour)}
-                            className={`border-l border-gray-100 p-1 cursor-pointer group relative ${isToday ? 'bg-emerald-50/30' : ''}`}
-                          >
-                            {cellBookings.length === 0 && (
-                              <div className="absolute inset-1 rounded-lg border-2 border-dashed border-transparent group-hover:border-emerald-200 transition-colors flex items-center justify-center">
-                                <Plus size={12} className="text-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-                              </div>
-                            )}
-                            {cellBookings.map((b) => (
+                  {visibleSlots.map((slotTime) => {
+                    const isHalfHour = slotTime.endsWith(':30');
+                    return (
+                      <div
+                        key={slotTime}
+                        className={`grid border-b transition-colors ${
+                          isHalfHour ? 'border-gray-50' : 'border-gray-100'
+                        } hover:bg-gray-50/30`}
+                        style={{
+                          gridTemplateColumns: '72px repeat(7, 1fr)',
+                          minHeight: `${SLOT_HEIGHT_PX}px`,
+                        }}
+                      >
+                        {/* Метка времени — показываем только целые часы, чтобы не загромождать */}
+                        <div className="text-xs text-gray-400 font-mono text-right pr-3 flex items-start justify-end pt-1 shrink-0">
+                          {isHalfHour ? (
+                            <span className="text-gray-300">·</span>
+                          ) : (
+                            slotTime
+                          )}
+                        </div>
+
+                        {/* Ячейки для каждого дня */}
+                        {weekDates.map((d, di) => {
+                          const isToday = formatDate(d) === today;
+                          const isCovered = isSlotCoveredByEarlierBooking(d, slotTime);
+                          const startingBookings = getBookingsStartingAtSlot(d, slotTime);
+
+                          // Если слот "перекрыт" растянутой карточкой — рисуем пустой div
+                          // (карточка уже нарисована выше через position:absolute или overflow:visible)
+                          if (isCovered) {
+                            return (
                               <div
-                                key={b.id}
-                                onClick={(e) => { e.stopPropagation(); setSelectedBooking(b); setShowBookingDetailModal(true); }}
-                                className={`rounded-lg border-l-4 p-1.5 text-xs cursor-pointer hover:shadow-md transition-shadow mb-1 ${STATUS_COLORS[b.status]}`}
-                              >
-                                <p className="font-semibold truncate">{b.client_name}</p>
-                                <p className="opacity-70 truncate">{b.service_name}</p>
-                                <p className="opacity-50">{b.time}</p>
-                              </div>
-                            ))}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))}
+                                key={di}
+                                className={`border-l border-gray-100 ${isToday ? 'bg-emerald-50/20' : ''}`}
+                              />
+                            );
+                          }
+
+                          return (
+                            <div
+                              key={di}
+                              onClick={() => handleCellClick(d, slotTime)}
+                              className={`border-l border-gray-100 p-0.5 cursor-pointer group relative ${isToday ? 'bg-emerald-50/20' : ''}`}
+                              style={{ minHeight: `${SLOT_HEIGHT_PX}px` }}
+                            >
+                              {/* Подсказка "+" при наведении на пустой слот */}
+                              {startingBookings.length === 0 && (
+                                <div className="absolute inset-0.5 rounded-lg border-2 border-dashed border-transparent group-hover:border-emerald-200 transition-colors flex items-center justify-center">
+                                  <Plus size={12} className="text-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                </div>
+                              )}
+
+                              {/* Карточки записей — растягиваются на нужное количество слотов */}
+                              {startingBookings.map((b) => {
+                                const cardHeight = getBookingCardHeight(b);
+                                const service = services.find(s => s.id === b.service_id);
+                                const duration = service?.duration ?? SLOT_MINUTES;
+                                const slotsCount = getSlotsCount(duration);
+
+                                return (
+                                  <div
+                                    key={b.id}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedBooking(b);
+                                      setShowBookingDetailModal(true);
+                                    }}
+                                    className={`rounded-lg border-l-4 px-1.5 py-1 text-xs cursor-pointer hover:shadow-md hover:z-10 transition-shadow ${STATUS_COLORS[b.status]}`}
+                                    style={{
+                                      // Карточка растягивается на все слоты длительности
+                                      height: `${cardHeight}px`,
+                                      // Позиционируем поверх следующих строк
+                                      position: 'relative',
+                                      zIndex: 1,
+                                      overflow: 'hidden',
+                                    }}
+                                  >
+                                    <p className="font-semibold truncate leading-tight">{b.client_name}</p>
+                                    <p className="opacity-70 truncate leading-tight">{b.service_name}</p>
+                                    <p className="opacity-50 leading-tight">{b.time}</p>
+                                    {slotsCount > 1 && (
+                                      <p className="opacity-40 text-xs leading-tight">{duration} мин</p>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Mobile views */}
+              {/* ===== MOBILE VIEWS ===== */}
               <div className="lg:hidden">
                 {mobileView === 'day' ? (
                   <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
@@ -614,18 +767,29 @@ export default function DashboardPage() {
                       <p className="text-sm text-gray-500">{getDayBookings(selectedDay).length} записей</p>
                     </div>
                     <div className="overflow-y-auto max-h-[60vh]">
-                      {HOURS.map((hour) => {
-                        const cellBookings = getBookingsForDayHour(selectedDay, hour);
+                      {visibleSlots.map((slotTime) => {
+                        const isHalfHour = slotTime.endsWith(':30');
+                        const isCovered = isSlotCoveredByEarlierBooking(selectedDay, slotTime);
+                        const cellBookings = getBookingsStartingAtSlot(selectedDay, slotTime);
+
+                        if (isCovered) return null;
+
                         return (
                           <div
-                            key={hour}
-                            className="flex gap-3 p-3 border-b border-gray-50 hover:bg-gray-50 cursor-pointer group"
-                            onClick={() => handleCellClick(selectedDay, hour)}
+                            key={slotTime}
+                            className={`flex gap-3 p-3 border-b cursor-pointer group ${
+                              isHalfHour ? 'border-gray-50 bg-gray-50/30' : 'border-gray-100 hover:bg-gray-50'
+                            }`}
+                            onClick={() => handleCellClick(selectedDay, slotTime)}
                           >
-                            <div className="w-12 text-xs text-gray-400 font-mono pt-1 shrink-0">
-                              {String(hour).padStart(2, '0')}:00
+                            <div className="w-14 text-xs font-mono pt-1 shrink-0 text-right">
+                              {isHalfHour ? (
+                                <span className="text-gray-300">·</span>
+                              ) : (
+                                <span className="text-gray-400">{slotTime}</span>
+                              )}
                             </div>
-                            <div className="flex-1 min-h-[40px]">
+                            <div className="flex-1" style={{ minHeight: '36px' }}>
                               {cellBookings.length === 0 ? (
                                 <div className="h-full flex items-center">
                                   <span className="text-xs text-gray-300 group-hover:text-emerald-400 transition-colors">
@@ -633,16 +797,24 @@ export default function DashboardPage() {
                                   </span>
                                 </div>
                               ) : (
-                                cellBookings.map((b) => (
-                                  <div
-                                    key={b.id}
-                                    onClick={(e) => { e.stopPropagation(); setSelectedBooking(b); setShowBookingDetailModal(true); }}
-                                    className={`rounded-xl border-l-4 p-2 text-xs mb-1 ${STATUS_COLORS[b.status]}`}
-                                  >
-                                    <p className="font-semibold">{b.client_name}</p>
-                                    <p className="opacity-70">{b.service_name} · {b.time}</p>
-                                  </div>
-                                ))
+                                cellBookings.map((b) => {
+                                  const service = services.find(s => s.id === b.service_id);
+                                  const duration = service?.duration ?? SLOT_MINUTES;
+                                  return (
+                                    <div
+                                      key={b.id}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedBooking(b);
+                                        setShowBookingDetailModal(true);
+                                      }}
+                                      className={`rounded-xl border-l-4 p-2 text-xs mb-1 ${STATUS_COLORS[b.status]}`}
+                                    >
+                                      <p className="font-semibold">{b.client_name}</p>
+                                      <p className="opacity-70">{b.service_name} · {b.time} · {duration} мин</p>
+                                    </div>
+                                  );
+                                })
                               )}
                             </div>
                           </div>
@@ -806,7 +978,6 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* ✅ ИСПРАВЛЕНИЕ: 24-часовой select без AM/PM */}
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 <h2 className="font-bold text-gray-900 text-lg mb-4">Время работы</h2>
                 <div className="grid grid-cols-2 gap-4">
@@ -817,10 +988,9 @@ export default function DashboardPage() {
                       onChange={(e) => setWorkStart(e.target.value)}
                       className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none bg-white text-gray-900"
                     >
-                      {Array.from({ length: 24 }, (_, h) => {
-                        const hour = String(h).padStart(2, '0');
-                        return <option key={hour} value={`${hour}:00`}>{hour}:00</option>;
-                      })}
+                      {ALL_TIME_SLOTS.map((slot) => (
+                        <option key={slot} value={slot}>{slot}</option>
+                      ))}
                     </select>
                   </div>
                   <div>
@@ -830,10 +1000,9 @@ export default function DashboardPage() {
                       onChange={(e) => setWorkEnd(e.target.value)}
                       className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none bg-white text-gray-900"
                     >
-                      {Array.from({ length: 24 }, (_, h) => {
-                        const hour = String(h).padStart(2, '0');
-                        return <option key={hour} value={`${hour}:00`}>{hour}:00</option>;
-                      })}
+                      {ALL_TIME_SLOTS.map((slot) => (
+                        <option key={slot} value={slot}>{slot}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -925,7 +1094,7 @@ export default function DashboardPage() {
               className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none bg-white text-gray-900"
             >
               {services.map((s) => (
-                <option key={s.id} value={s.id}>{s.name} — {s.price} ₽</option>
+                <option key={s.id} value={s.id}>{s.name} — {s.price} ₽ · {s.duration} мин</option>
               ))}
             </select>
           </div>
@@ -936,12 +1105,18 @@ export default function DashboardPage() {
               value={bookingForm.date}
               onChange={(e) => setBookingForm((f) => ({ ...f, date: e.target.value }))}
             />
-            <Input
-              label="Время"
-              type="time"
-              value={bookingForm.time}
-              onChange={(e) => setBookingForm((f) => ({ ...f, time: e.target.value }))}
-            />
+            <div>
+              <label className="text-sm font-medium text-gray-700 block mb-1">Время</label>
+              <select
+                value={bookingForm.time}
+                onChange={(e) => setBookingForm((f) => ({ ...f, time: e.target.value }))}
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none bg-white text-gray-900"
+              >
+                {ALL_TIME_SLOTS.map((slot) => (
+                  <option key={slot} value={slot}>{slot}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="flex gap-3 pt-2">
             <Button variant="ghost" className="flex-1" onClick={() => setShowAddBookingModal(false)}>Отмена</Button>
@@ -959,12 +1134,19 @@ export default function DashboardPage() {
             <div className={`rounded-xl border-l-4 p-4 ${STATUS_COLORS[selectedBooking.status]}`}>
               <p className="font-bold text-lg">{selectedBooking.client_name}</p>
               <p className="text-sm opacity-80">{selectedBooking.service_name}</p>
-              {/* ✅ ИСПРАВЛЕНИЕ: parseDateFromString без UTC сдвига */}
               <p className="text-sm font-medium mt-1">
                 {parseDateFromString(selectedBooking.date).toLocaleDateString('ru-RU', {
                   weekday: 'long', day: 'numeric', month: 'long'
                 })} в {selectedBooking.time}
               </p>
+              {(() => {
+                const svc = services.find(s => s.id === selectedBooking.service_id);
+                return svc ? (
+                  <p className="text-xs opacity-60 mt-1">
+                    Длительность: {svc.duration} мин ({getSlotsCount(svc.duration)} слота по 30 мин)
+                  </p>
+                ) : null;
+              })()}
             </div>
 
             <div className="grid grid-cols-2 gap-3 text-sm">

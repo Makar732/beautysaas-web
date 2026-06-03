@@ -1,3 +1,4 @@
+// src/pages/BookingPage.tsx
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -12,26 +13,27 @@ import { Master, Service, Booking } from '../types';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { PhoneInput, isPhoneComplete } from '../components/ui/PhoneInput';
-// ✅ ИСПРАВЛЕНИЕ: Импорт утилит для работы с датами
-import { formatDateToString, parseDateFromString, formatDateRU } from '../utils/dateUtils';
 
-const SLOT_INTERVAL = 30;
-// ✅ ИСПРАВЛЕНИЕ: 24/7 по умолчанию
-const DEFAULT_DAY_START = 0;
-const DEFAULT_DAY_END = 24;
+const SLOT_INTERVAL = 30; // минут — шаг сетки, строго совпадает с DashboardPage
 
 function generateId() {
   return `booking-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-function generateTimeSlots(startHour: number, endHour: number): string[] {
-  const slots: string[] = [];
-  for (let h = startHour; h < endHour; h++) {
-    for (let m = 0; m < 60; m += SLOT_INTERVAL) {
-      slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
-    }
-  }
-  return slots;
+function dateToStr(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function strToDate(dateStr: string): Date {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function formatDateRU(date: Date): string {
+  return date.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
 }
 
 function getMonthMatrix(year: number, month: number): (Date | null)[][] {
@@ -53,6 +55,47 @@ function getMonthMatrix(year: number, month: number): (Date | null)[][] {
     matrix.push(week);
   }
   return matrix;
+}
+
+/**
+ * Переводим "HH:MM" в минуты от полуночи.
+ */
+function timeToMinutes(time: string): number {
+  const [h, m] = time.split(':').map(Number);
+  return h * 60 + m;
+}
+
+/**
+ * Переводим минуты от полуночи обратно в "HH:MM".
+ */
+function minutesToTime(totalMinutes: number): string {
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/**
+ * Сколько слотов по SLOT_INTERVAL минут занимает услуга.
+ * duration=100 → ceil(100/30)=4 слота
+ */
+function getSlotsCount(durationMinutes: number): number {
+  return Math.ceil(durationMinutes / SLOT_INTERVAL);
+}
+
+/**
+ * Возвращает ВСЕ слоты (строки "HH:MM"), которые будет занимать запись
+ * если она начинается в startTime и длится durationMinutes.
+ */
+function getOccupiedSlotsByBooking(startTime: string, durationMinutes: number): string[] {
+  const startMin = timeToMinutes(startTime);
+  const slotsCount = getSlotsCount(durationMinutes);
+  const occupiedSlots: string[] = [];
+  for (let i = 0; i < slotsCount; i++) {
+    const slotMin = startMin + i * SLOT_INTERVAL;
+    if (slotMin >= 24 * 60) break; // не выходим за полночь
+    occupiedSlots.push(minutesToTime(slotMin));
+  }
+  return occupiedSlots;
 }
 
 type Step = 'service' | 'datetime' | 'contacts' | 'success';
@@ -90,65 +133,120 @@ export default function BookingPage() {
 
   useEffect(() => {
     async function fetchMasterData() {
-      if (!master_slug) {
-        setNotFound(true);
-        return;
-      }
-      
+      if (!master_slug) { setNotFound(true); return; }
+
       const foundMaster = await getMasterBySlug(master_slug);
-      
-      if (!foundMaster) {
-        setNotFound(true);
-        return;
-      }
-      
-      // ✅ ИСПРАВЛЕНИЕ: 24/7 по умолчанию если нет настроек
+      if (!foundMaster) { setNotFound(true); return; }
+
       const formattedMaster = {
         ...foundMaster,
-        workingHours: (foundMaster as any).working_hours || foundMaster.workingHours || { start: '00:00', end: '24:00' },
+        workingHours: (foundMaster as any).working_hours || foundMaster.workingHours || { start: '00:00', end: '23:30' },
         daysOff: (foundMaster as any).days_off || foundMaster.daysOff || []
       };
-      
+
       setMaster(formattedMaster);
-      
+
       const masterServices = await getServicesByMasterId(formattedMaster.id);
       const masterBookings = await getBookingsByMasterId(formattedMaster.id);
-      
       setServices(masterServices);
       setExistingBookings(masterBookings);
     }
-    
+
     fetchMasterData();
   }, [master_slug]);
 
+  /**
+   * Генерирует все доступные слоты в рабочем диапазоне мастера.
+   * Шаг строго SLOT_INTERVAL (30 мин).
+   */
   const getMasterTimeSlots = (): string[] => {
-    if (!master?.workingHours) {
-      return generateTimeSlots(DEFAULT_DAY_START, DEFAULT_DAY_END);
+    const workHours = master?.workingHours;
+
+    if (!workHours) {
+      const slots: string[] = [];
+      for (let h = 0; h < 24; h++) {
+        for (let m = 0; m < 60; m += SLOT_INTERVAL) {
+          slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+        }
+      }
+      return slots;
     }
-    const [startH] = master.workingHours.start.split(':').map(Number);
-    const [endH] = master.workingHours.end.split(':').map(Number);
-    return generateTimeSlots(startH, endH);
+
+    const [startH, startM = 0] = workHours.start.split(':').map(Number);
+    const [endH, endM = 0] = workHours.end.split(':').map(Number);
+
+    const slots: string[] = [];
+    for (let h = 0; h < 24; h++) {
+      for (let m = 0; m < 60; m += SLOT_INTERVAL) {
+        const totalMinutes = h * 60 + m;
+        const startTotal = startH * 60 + startM;
+        const endTotal = endH * 60 + endM;
+        if (totalMinutes < startTotal) continue;
+        if (totalMinutes > endTotal) continue;
+        slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+      }
+    }
+    return slots;
   };
 
   const isDayOff = (date: Date): boolean => {
-    if (!master?.daysOff || master.daysOff.length === 0) return false; // ✅ Все дни рабочие
+    if (!master?.daysOff || master.daysOff.length === 0) return false;
     return master.daysOff.includes(date.getDay());
   };
 
   const allSlots = getMasterTimeSlots();
   const matrixDates = getMonthMatrix(calendarYear, calendarMonth);
 
-  const getOccupiedSlots = (dateStr: string): string[] => {
-    return existingBookings
+  /**
+   * Возвращает SET всех заблокированных слотов на дату.
+   * Учитывает длительность каждой существующей записи:
+   * запись в 10:00 на 100 мин блокирует 10:00, 10:30, 11:00, 11:30
+   */
+  const getBlockedSlotsForDate = (dateStr: string): Set<string> => {
+    const blocked = new Set<string>();
+
+    existingBookings
       .filter((b) => b.date === dateStr && b.status !== 'cancelled')
-      .map((b) => b.time);
+      .forEach((b) => {
+        // Ищем длительность услуги этой записи
+        const service = services.find(s => s.id === b.service_id);
+        const duration = service?.duration ?? SLOT_INTERVAL;
+        // Все слоты, которые занимает эта запись
+        const occupiedSlots = getOccupiedSlotsByBooking(b.time, duration);
+        occupiedSlots.forEach(slot => blocked.add(slot));
+      });
+
+    return blocked;
   };
 
-  const isSlotOccupied = (time: string): boolean => {
-    if (!selectedDate) return false;
-    return getOccupiedSlots(formatDateToString(selectedDate)).includes(time); // ✅ ИСПРАВЛЕНИЕ
+  /**
+   * Проверяет: можно ли записаться на выбранный слот с учётом длительности НОВОЙ услуги.
+   * Слот заблокирован если:
+   * 1. Какая-то существующая запись занимает этот слот (прямо или из-за своей длительности)
+   * 2. НОВАЯ запись в этот слот выйдет за рамки рабочего времени
+   * 3. НОВАЯ запись в этот слот перекроет какую-то существующую запись
+   */
+  const isSlotBlocked = (time: string, dateStr: string): boolean => {
+    if (!selectedService) return false;
+
+    const blockedByExisting = getBlockedSlotsForDate(dateStr);
+
+    // Проверяем все слоты, которые займёт новая запись
+    const newBookingSlots = getOccupiedSlotsByBooking(time, selectedService.duration);
+
+    for (const slot of newBookingSlots) {
+      // Слот занят существующей записью
+      if (blockedByExisting.has(slot)) return true;
+      // Слот выходит за рамки рабочего времени
+      if (!allSlots.includes(slot)) return true;
+    }
+
+    return false;
   };
 
+  /**
+   * Проверяет: прошёл ли этот слот по времени (для сегодняшней даты).
+   */
   const isPastSlot = (time: string): boolean => {
     if (!selectedDate) return false;
     const now = new Date();
@@ -156,6 +254,15 @@ export default function BookingPage() {
     const [h, m] = time.split(':').map(Number);
     d.setHours(h, m, 0, 0);
     return d <= now;
+  };
+
+  /**
+   * Проверяет: все ли слоты дня заняты (для окрашивания дней в календаре).
+   * Учитывает длительность выбранной услуги.
+   */
+  const isDayFullyBooked = (dateStr: string): boolean => {
+    if (!selectedService) return false;
+    return allSlots.every(slot => isSlotBlocked(slot, dateStr) || isPastSlot(slot));
   };
 
   const validateContacts = () => {
@@ -170,7 +277,6 @@ export default function BookingPage() {
     if (!validateContacts() || !master || !selectedService || !selectedDate || !selectedTime) return;
     setLoading(true);
 
-    // ✅ ИСПРАВЛЕНИЕ: Используем formatDateToString вместо toISOString
     const booking: Booking = {
       id: generateId(),
       master_id: master.id,
@@ -178,7 +284,7 @@ export default function BookingPage() {
       service_name: selectedService.name,
       client_name: clientName.trim(),
       client_phone: clientPhone.trim(),
-      date: formatDateToString(selectedDate),
+      date: dateToStr(selectedDate),
       time: selectedTime,
       status: 'pending',
       created_at: new Date().toISOString(),
@@ -194,7 +300,7 @@ export default function BookingPage() {
           clientName: booking.client_name,
           clientPhone: booking.client_phone,
           serviceName: booking.service_name,
-          date: formatDateRU(selectedDate), // ✅ ИСПРАВЛЕНИЕ
+          date: formatDateRU(selectedDate),
           time: booking.time,
           masterName: master.name,
         },
@@ -204,7 +310,7 @@ export default function BookingPage() {
 
     setLoading(false);
     setStep('success');
-    
+
     const updatedBookings = await getBookingsByMasterId(master.id);
     setExistingBookings(updatedBookings);
   };
@@ -303,7 +409,6 @@ export default function BookingPage() {
                     <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity transform translate-x-4 group-hover:translate-x-0">
                       <ArrowRight className="text-emerald-500" size={20} />
                     </div>
-                    
                     <div className="flex flex-col h-full justify-between">
                       <div>
                         <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-4 group-hover:bg-emerald-500 group-hover:text-white transition-colors">
@@ -314,7 +419,6 @@ export default function BookingPage() {
                           <p className="text-sm text-gray-500 mb-4 line-clamp-2">{s.description}</p>
                         )}
                       </div>
-                      
                       <div className="flex items-end justify-between mt-4 pt-4 border-t border-gray-100">
                         <div className="flex items-center gap-1.5 text-gray-400 bg-gray-50 px-3 py-1.5 rounded-lg">
                           <Clock size={14} />
@@ -346,9 +450,15 @@ export default function BookingPage() {
               <div>
                 <p className="text-sm text-emerald-800/60 font-medium mb-1 uppercase tracking-wide">Выбранная услуга</p>
                 <p className="text-xl font-bold text-gray-900">{selectedService.name}</p>
-                <div className="flex items-center gap-1.5 mt-2 text-emerald-700 font-medium">
-                  <Clock size={14} />
-                  <span>{selectedService.duration} мин</span>
+                <div className="flex items-center gap-3 mt-2">
+                  <div className="flex items-center gap-1.5 text-emerald-700 font-medium">
+                    <Clock size={14} />
+                    <span>{selectedService.duration} мин</span>
+                  </div>
+                  <span className="text-emerald-300">·</span>
+                  <span className="text-sm text-emerald-700/60">
+                    займёт {getSlotsCount(selectedService.duration)} слота по 30 мин
+                  </span>
                 </div>
               </div>
               <span className="font-black text-emerald-600 text-2xl">
@@ -396,20 +506,19 @@ export default function BookingPage() {
                   {matrixDates.flat().map((d, i) => {
                     if (!d) return <div key={i} className="aspect-square" />;
                     const isPast = d < today;
-                    // ✅ ИСПРАВЛЕНИЕ: Сравнение через formatDateToString
-                    const isSelected = selectedDate && formatDateToString(d) === formatDateToString(selectedDate);
-                    const isToday = formatDateToString(d) === formatDateToString(today);
+                    const isSelected = selectedDate && dateToStr(d) === dateToStr(selectedDate);
+                    const isToday = dateToStr(d) === dateToStr(today);
                     const dayOff = isDayOff(d);
-                    const dayOccupied = getOccupiedSlots(formatDateToString(d));
-                    const allSlotsOccupied = allSlots.every((s) => dayOccupied.includes(s));
-                    const disabled = isPast || allSlotsOccupied || dayOff;
+                    // Теперь проверяем с учётом длительности выбранной услуги
+                    const fullyBooked = isDayFullyBooked(dateToStr(d));
+                    const disabled = isPast || fullyBooked || dayOff;
 
                     return (
                       <button
                         key={i}
                         disabled={disabled}
                         onClick={() => { setSelectedDate(d); setSelectedTime(null); }}
-                        title={dayOff ? 'Выходной день' : undefined}
+                        title={dayOff ? 'Выходной день' : fullyBooked ? 'Нет свободного времени' : undefined}
                         className={`aspect-square flex items-center justify-center rounded-xl text-sm font-bold transition-all ${
                           disabled
                             ? 'text-gray-300 cursor-not-allowed bg-gray-50'
@@ -448,20 +557,21 @@ export default function BookingPage() {
                   <div className="flex flex-col h-[280px]">
                     <div className="bg-emerald-50 text-emerald-800 px-4 py-3 rounded-xl font-medium flex items-center gap-2 mb-4 shrink-0">
                       <Check size={16} className="text-emerald-500" />
-                      {/* ✅ ИСПРАВЛЕНИЕ: formatDateRU вместо formatDateRU(selectedDate) */}
                       {formatDateRU(selectedDate)}
                     </div>
-                    
                     <div className="grid grid-cols-3 gap-3 overflow-y-auto pr-2 pb-2 custom-scrollbar">
                       {allSlots.map((slot) => {
-                        const occupied = isSlotOccupied(slot);
+                        const dateStr = dateToStr(selectedDate);
+                        // Блокируем с учётом длительности выбранной услуги
+                        const blocked = isSlotBlocked(slot, dateStr);
                         const past = isPastSlot(slot);
-                        const disabled = occupied || past;
+                        const disabled = blocked || past;
                         return (
                           <button
                             key={slot}
                             disabled={disabled}
                             onClick={() => setSelectedTime(slot)}
+                            title={blocked ? 'Время занято' : past ? 'Время прошло' : undefined}
                             className={`py-3.5 rounded-xl text-base font-bold transition-all ${
                               disabled
                                 ? 'bg-gray-50 text-gray-300 cursor-not-allowed border border-gray-100'
@@ -479,7 +589,7 @@ export default function BookingPage() {
                 )}
               </div>
             </div>
-            
+
             {selectedDate && selectedTime && (
               <div className="mt-8 flex justify-end animate-in slide-in-from-bottom-4">
                 <Button
@@ -508,7 +618,7 @@ export default function BookingPage() {
 
             <div className="bg-white rounded-3xl border border-gray-200 p-8 shadow-sm">
               <h2 className="font-bold text-gray-900 text-2xl mb-6">Ваши данные</h2>
-              
+
               <div className="space-y-5 mb-8">
                 <div className="relative">
                   <Input
@@ -542,13 +652,16 @@ export default function BookingPage() {
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-gray-500 flex items-center gap-2"><Calendar size={14}/> Дата</span>
                     <span className="font-medium text-gray-900">
-                      {/* ✅ ИСПРАВЛЕНИЕ */}
-                      {selectedDate && formatDateRU(selectedDate).split(',')[0]}
+                      {selectedDate?.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}
                     </span>
                   </div>
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-gray-500 flex items-center gap-2"><Clock size={14}/> Время</span>
                     <span className="font-medium text-gray-900">{selectedTime}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-500 flex items-center gap-2"><Clock size={14}/> Длительность</span>
+                    <span className="font-medium text-gray-900">{selectedService?.duration} мин</span>
                   </div>
                   <div className="pt-3 mt-3 border-t border-gray-200 flex justify-between items-center">
                     <span className="font-medium text-gray-900">К оплате</span>
@@ -608,9 +721,8 @@ export default function BookingPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-sm text-gray-500 mb-1">Дата</p>
-                    {/* ✅ ИСПРАВЛЕНИЕ: Парсинг через parseDateFromString */}
                     <p className="font-semibold text-gray-900">
-                      {parseDateFromString(createdBooking.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
+                      {strToDate(createdBooking.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
                     </p>
                   </div>
                   <div>
@@ -618,6 +730,12 @@ export default function BookingPage() {
                     <p className="font-bold text-emerald-600 text-lg">{createdBooking.time}</p>
                   </div>
                 </div>
+                {selectedService && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">Длительность</p>
+                    <p className="font-semibold text-gray-900">{selectedService.duration} мин</p>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -653,16 +771,9 @@ export default function BookingPage() {
       </main>
 
       <style dangerouslySetInnerHTML={{__html: `
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background-color: #e5e7eb;
-          border-radius: 20px;
-        }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #e5e7eb; border-radius: 20px; }
       `}} />
     </div>
   );
