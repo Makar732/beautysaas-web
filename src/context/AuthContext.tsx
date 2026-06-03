@@ -9,9 +9,9 @@ interface AuthContextType {
   needsOnboarding: boolean;
   loginAsGuest: () => void;
   loginWithGoogle: () => void;
-  completeOnboarding: (name: string, phone: string) => void;
+  completeOnboarding: (name: string, phone: string) => Promise<void>;
   logout: () => void;
-  updateUser: (updates: Partial<AppUser>) => void;
+  updateUser: (updates: Partial<AppUser>) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -28,23 +28,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const loginAsGuest = () => {
-    // Демо-вход (отключен)
-  };
+  const loginAsGuest = () => {};
 
   const loginWithGoogle = () => {
     const savedUser = getUser();
     if (savedUser) {
-      // Профиль уже есть, впускаем
       setUser(savedUser);
       setNeedsOnboarding(false);
     } else {
-      // Профиля нет — показываем окно создания профиля
       setNeedsOnboarding(true);
     }
   };
 
-  const completeOnboarding = (name: string, phone: string) => {
+  const completeOnboarding = async (name: string, phone: string) => {
     const slug = generateSlug(name);
     const id = `master-${slug}-${Date.now()}`;
 
@@ -67,10 +63,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         start: '09:00',
         end: '21:00',
       },
-      daysOff: [], // Без выходных по умолчанию
+      daysOff: [], 
     };
 
-    upsertMaster(master);
+    // ЖДЁМ сохранения в базу данных!
+    await upsertMaster(master);
+    
     saveUser(newUser);
     setUser(newUser);
     setNeedsOnboarding(false);
@@ -82,14 +80,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setNeedsOnboarding(false);
   };
 
-  const updateUser = (updates: Partial<AppUser>) => {
+  const updateUser = async (updates: Partial<AppUser>) => {
     if (!user) return;
     const updated = { ...user, ...updates };
-    saveUser(updated);
-    setUser(updated);
-
-    // Синхронизация с профилем мастера
-    upsertMaster({
+    
+    // Ждём сохранения профиля
+    await upsertMaster({
       id: updated.id,
       name: updated.name,
       slug: updated.slug,
@@ -99,6 +95,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       daysOff: updated.daysOff,
       created_at: new Date().toISOString(),
     });
+
+    saveUser(updated);
+    setUser(updated);
   };
 
   return (

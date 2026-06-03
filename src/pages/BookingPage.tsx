@@ -94,23 +94,36 @@ export default function BookingPage() {
   const [calendarMonth, setCalendarMonth] = useState(today.getMonth());
 
   useEffect(() => {
-    // СТРОГАЯ СИНХРОНИЗАЦИЯ: Ищем только того мастера, чей slug в URL
-    if (!master_slug) {
-      setNotFound(true);
-      return;
+    async function fetchMasterData() {
+      if (!master_slug) {
+        setNotFound(true);
+        return;
+      }
+      
+      const foundMaster = await getMasterBySlug(master_slug);
+      
+      if (!foundMaster) {
+        setNotFound(true);
+        return;
+      }
+      
+      // Конвертация форматов БД (snake_case -> camelCase)
+      const formattedMaster = {
+        ...foundMaster,
+        workingHours: (foundMaster as any).working_hours || { start: '09:00', end: '21:00' },
+        daysOff: (foundMaster as any).days_off || []
+      };
+      
+      setMaster(formattedMaster);
+      
+      const masterServices = await getServicesByMasterId(formattedMaster.id);
+      const masterBookings = await getBookingsByMasterId(formattedMaster.id);
+      
+      setServices(masterServices);
+      setExistingBookings(masterBookings);
     }
     
-    const foundMaster = getMasterBySlug(master_slug);
-    
-    if (!foundMaster) {
-      setNotFound(true);
-      return;
-    }
-    
-    setMaster(foundMaster);
-    // Берем услуги и записи ИМЕННО этого мастера
-    setServices(getServicesByMasterId(foundMaster.id));
-    setExistingBookings(getBookingsByMasterId(foundMaster.id));
+    fetchMasterData();
   }, [master_slug]);
 
   const getMasterTimeSlots = (): string[] => {
@@ -171,11 +184,11 @@ export default function BookingPage() {
       client_phone: clientPhone.trim(),
       date: dateToStr(selectedDate),
       time: selectedTime,
-      status: 'confirmed',
+      status: 'pending', // Поставим 'pending', чтобы мастер сам подтвердил
       created_at: new Date().toISOString(),
     };
 
-    addBooking(booking);
+    await addBooking(booking);
     setCreatedBooking(booking);
 
     if (master.telegram_chat_id) {
@@ -193,16 +206,17 @@ export default function BookingPage() {
       );
     }
 
-    await new Promise((r) => setTimeout(r, 800));
     setLoading(false);
     setStep('success');
-    setExistingBookings(getBookingsByMasterId(master.id));
+    
+    // Обновляем список бронирований после добавления
+    const updatedBookings = await getBookingsByMasterId(master.id);
+    setExistingBookings(updatedBookings);
   };
 
   const stepIndex = { service: 0, datetime: 1, contacts: 2, success: 3 };
   const isContactsValid = clientName.trim().length >= 2 && isPhoneComplete(clientPhone);
 
-  // Мастер не найден — показываем заглушку
   if (notFound) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -456,7 +470,7 @@ export default function BookingPage() {
                                 ? 'bg-gray-50 text-gray-300 cursor-not-allowed border border-gray-100'
                                 : selectedTime === slot
                                 ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                                : 'bg-white text-gray-700 hover:bg-emerald-50 hover:text-emerald-700 border border-gray-200 hover:border-emerald-200'
+                                : 'bg-white text-gray-700 hover:bg-emerald-50 hover:text-emerald-700 border border-gray-200 hover:border-emerald-200 cursor-pointer'
                             }`}
                           >
                             {slot}

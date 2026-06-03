@@ -3,13 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import {
   Calendar, Package, Settings, LogOut, Sparkles, Plus, Trash2, Edit3,
   Copy, Check, ExternalLink, Bell, Clock, User, Phone, DollarSign,
-  ChevronLeft, ChevronRight, Save, TrendingUp,
+  ChevronLeft, ChevronRight, Save, TrendingUp
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
   getBookingsByMasterId, getServicesByMasterId,
   upsertService, deleteService, addBooking, updateBookingStatus, deleteBooking,
-  getMasterById, upsertMaster
+  getMasterById
 } from '../lib/storage';
 import { Booking, Service } from '../types';
 import { Button } from '../components/ui/Button';
@@ -71,6 +71,7 @@ export default function DashboardPage() {
   const [telegramChatId, setTelegramChatId] = useState('');
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [mobileView, setMobileView] = useState<'week' | 'day'>('week');
+  const [isLoading, setIsLoading] = useState(true);
 
   // Настройки мастера
   const [workStart, setWorkStart] = useState('09:00');
@@ -88,26 +89,43 @@ export default function DashboardPage() {
   const [serviceForm, setServiceForm] = useState({ name: '', price: '', duration: '' });
 
   useEffect(() => {
-    if (!user) { navigate('/login'); return; }
+    if (!user) { 
+      navigate('/login'); 
+      return; 
+    }
     const week = getWeekDates(currentDate);
     setWeekDates(week);
     loadData();
-    // Load settings
-    const master = getMasterById(user.id);
-    if (master?.telegram_chat_id) setTelegramChatId(master.telegram_chat_id);
-    if (master?.workingHours) {
-      setWorkStart(master.workingHours.start);
-      setWorkEnd(master.workingHours.end);
-    }
-    if (master?.daysOff) {
-      setDaysOff(master.daysOff);
-    }
   }, [user, currentDate]);
 
-  const loadData = () => {
+  const loadData = async () => {
     if (!user) return;
-    setBookings(getBookingsByMasterId(user.id));
-    setServices(getServicesByMasterId(user.id));
+    setIsLoading(true);
+    
+    // Загружаем данные из облака асинхронно
+    const fetchedBookings = await getBookingsByMasterId(user.id);
+    const fetchedServices = await getServicesByMasterId(user.id);
+    const master = await getMasterById(user.id);
+    
+    setBookings(fetchedBookings);
+    setServices(fetchedServices);
+
+    if (master) {
+      if (master.telegram_chat_id) setTelegramChatId(master.telegram_chat_id);
+      
+      // Нам возвращается змеиный_кейс из БД или camelCase из локального объекта
+      const workHours = (master as any).working_hours || master.workingHours;
+      if (workHours) {
+        setWorkStart(workHours.start);
+        setWorkEnd(workHours.end);
+      }
+      
+      const offDays = (master as any).days_off || master.daysOff;
+      if (offDays) {
+        setDaysOff(offDays);
+      }
+    }
+    setIsLoading(false);
   };
 
   const masterId = user?.id || '';
@@ -142,9 +160,10 @@ export default function DashboardPage() {
     setShowAddBookingModal(true);
   };
 
-  const handleAddBooking = () => {
+  const handleAddBooking = async () => {
     if (!bookingForm.clientName || !isPhoneComplete(bookingForm.clientPhone) || !bookingForm.serviceId) return;
     const service = services.find((s) => s.id === bookingForm.serviceId);
+    
     const newBooking: Booking = {
       id: generateId(),
       master_id: masterId,
@@ -157,36 +176,57 @@ export default function DashboardPage() {
       status: 'confirmed',
       created_at: new Date().toISOString(),
     };
-    addBooking(newBooking);
-    loadData();
+    
+    await addBooking(newBooking);
+    await loadData();
     setShowAddBookingModal(false);
   };
 
-  const handleStatusChange = (bookingId: string, status: Booking['status']) => {
-    updateBookingStatus(bookingId, status);
-    loadData();
+  const handleStatusChange = async (bookingId: string, status: Booking['status']) => {
+    await updateBookingStatus(bookingId, status);
+    await loadData();
   };
 
-  const handleDeleteBooking = (bookingId: string) => {
-    deleteBooking(bookingId);
-    loadData();
+  const handleDeleteBooking = async (bookingId: string) => {
+    await deleteBooking(bookingId);
+    await loadData();
     setShowBookingDetailModal(false);
   };
 
-  const handleSaveService = () => {
+  // ========================================
+  // ✅ ИСПРАВЛЕНИЕ: БАГ С УСЛУГАМИ
+  // ========================================
+  const handleSaveService = async () => {
     if (!serviceForm.name || !serviceForm.price || !serviceForm.duration) return;
-    const service: Service = {
-      id: editingService?.id || generateId(),
-      master_id: masterId,
-      name: serviceForm.name,
-      price: Number(serviceForm.price),
-      duration: Number(serviceForm.duration),
-    };
-    upsertService(service);
-    loadData();
-    setShowEditServiceModal(false);
-    setEditingService(null);
-    setServiceForm({ name: '', price: '', duration: '' });
+    
+    try {
+      const service: Service = {
+        id: editingService?.id || generateId(),
+        master_id: masterId,
+        name: serviceForm.name.trim(),
+        price: Number(serviceForm.price),
+        duration: Number(serviceForm.duration),
+      };
+      
+      console.log('🔄 Сохраняем услугу:', service);
+      
+      await upsertService(service);
+      
+      console.log('✅ Услуга сохранена, перезагружаем список...');
+      
+      // Обновляем список услуг из БД
+      await loadData();
+      
+      // Закрываем модалку и сбрасываем форму
+      setShowEditServiceModal(false);
+      setEditingService(null);
+      setServiceForm({ name: '', price: '', duration: '' });
+      
+      console.log('✅ Услуга добавлена и отображена!');
+    } catch (error) {
+      console.error('❌ Ошибка при сохранении услуги:', error);
+      alert('Не удалось сохранить услугу. Проверьте консоль.');
+    }
   };
 
   const handleEditService = (s: Service) => {
@@ -195,9 +235,9 @@ export default function DashboardPage() {
     setShowEditServiceModal(true);
   };
 
-  const handleDeleteService = (id: string) => {
-    deleteService(id);
-    loadData();
+  const handleDeleteService = async (id: string) => {
+    await deleteService(id);
+    await loadData();
   };
 
   const toggleDayOff = (day: number) => {
@@ -206,7 +246,7 @@ export default function DashboardPage() {
     );
   };
 
-  const handleSaveSettings = () => {
+  const handleSaveSettings = async () => {
     if (!user) return;
     const updatedUser = {
       ...user,
@@ -214,13 +254,8 @@ export default function DashboardPage() {
       workingHours: { start: workStart, end: workEnd },
       daysOff,
     };
-    updateUser(updatedUser);
-    upsertMaster({
-      id: user.id, name: user.name, slug: user.slug, phone: user.phone,
-      telegram_chat_id: telegramChatId, created_at: new Date().toISOString(),
-      workingHours: { start: workStart, end: workEnd },
-      daysOff,
-    });
+    
+    await updateUser(updatedUser);
     setSettingsSaved(true);
     setTimeout(() => setSettingsSaved(false), 2000);
   };
@@ -256,7 +291,6 @@ export default function DashboardPage() {
     setRevenueMonth(new Date(revenueMonth.getFullYear(), revenueMonth.getMonth() + 1));
   };
 
-  // Stats
   const today = formatDate(new Date());
   const todayBookings = bookings.filter((b) => b.date === today && b.status !== 'cancelled');
   const todayRevenue = todayBookings.reduce((sum, b) => {
@@ -286,11 +320,6 @@ export default function DashboardPage() {
             </div>
             <p className="font-semibold text-sm truncate">{user.name}</p>
             <p className="text-xs text-gray-400 truncate">{user.phone}</p>
-            {user.isGuest && (
-              <span className="inline-block mt-1 text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full">
-                Демо-режим
-              </span>
-            )}
           </div>
         </div>
 
@@ -353,7 +382,15 @@ export default function DashboardPage() {
       </div>
 
       {/* MAIN CONTENT */}
-      <main className="flex-1 overflow-auto pb-20 lg:pb-0">
+      <main className="flex-1 overflow-auto pb-20 lg:pb-0 relative">
+        
+        {/* Индикатор загрузки */}
+        {isLoading && (
+          <div className="absolute inset-0 bg-white/60 z-50 flex items-center justify-center backdrop-blur-sm">
+             <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        )}
+
         {/* Mobile Header */}
         <div className="lg:hidden bg-gray-950 text-white px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -800,27 +837,45 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Время работы */}
+              {/* ========================================
+                  ✅ ИСПРАВЛЕНИЕ: БАГ С AM/PM
+                  ======================================== */}
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 <h2 className="font-bold text-gray-900 text-lg mb-4">Время работы</h2>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-sm font-medium text-gray-700 block mb-2">Начало дня</label>
-                    <input
-                      type="time"
+                    <select
                       value={workStart}
                       onChange={(e) => setWorkStart(e.target.value)}
-                      className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none"
-                    />
+                      className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none bg-white text-gray-900"
+                    >
+                      {Array.from({ length: 24 }, (_, h) => {
+                        const hour = String(h).padStart(2, '0');
+                        return (
+                          <option key={hour} value={`${hour}:00`}>
+                            {hour}:00
+                          </option>
+                        );
+                      })}
+                    </select>
                   </div>
                   <div>
                     <label className="text-sm font-medium text-gray-700 block mb-2">Конец дня</label>
-                    <input
-                      type="time"
+                    <select
                       value={workEnd}
                       onChange={(e) => setWorkEnd(e.target.value)}
-                      className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none"
-                    />
+                      className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none bg-white text-gray-900"
+                    >
+                      {Array.from({ length: 24 }, (_, h) => {
+                        const hour = String(h).padStart(2, '0');
+                        return (
+                          <option key={hour} value={`${hour}:00`}>
+                            {hour}:00
+                          </option>
+                        );
+                      })}
+                    </select>
                   </div>
                 </div>
               </div>

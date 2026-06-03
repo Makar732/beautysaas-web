@@ -1,120 +1,11 @@
+import { supabase } from './supabase';
 import { Master, Service, Booking, AppUser } from '../types';
 
 export const TELEGRAM_BOT_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN_HERE';
 
 const KEYS = {
   USER: 'beauty_saas_user',
-  MASTERS: 'beauty_saas_masters',
-  SERVICES: 'beauty_saas_services',
-  BOOKINGS: 'beauty_saas_bookings',
 };
-
-// ---- MASTERS ----
-export function getMasters(): Master[] {
-  try {
-    const data = localStorage.getItem(KEYS.MASTERS);
-    return data ? JSON.parse(data) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function saveMasters(masters: Master[]) {
-  localStorage.setItem(KEYS.MASTERS, JSON.stringify(masters));
-}
-
-export function getMasterBySlug(slug: string): Master | null {
-  const masters = getMasters();
-  return masters.find((m) => m.slug === slug) || null;
-}
-
-export function getMasterById(id: string): Master | null {
-  const masters = getMasters();
-  return masters.find((m) => m.id === id) || null;
-}
-
-export function upsertMaster(master: Master) {
-  const masters = getMasters();
-  const idx = masters.findIndex((m) => m.id === master.id);
-  if (idx >= 0) {
-    masters[idx] = master;
-  } else {
-    masters.push(master);
-  }
-  saveMasters(masters);
-}
-
-// ---- SERVICES ----
-export function getServices(): Service[] {
-  try {
-    const data = localStorage.getItem(KEYS.SERVICES);
-    return data ? JSON.parse(data) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function saveServices(services: Service[]) {
-  localStorage.setItem(KEYS.SERVICES, JSON.stringify(services));
-}
-
-export function getServicesByMasterId(masterId: string): Service[] {
-  return getServices().filter((s) => s.master_id === masterId);
-}
-
-export function upsertService(service: Service) {
-  const services = getServices();
-  const idx = services.findIndex((s) => s.id === service.id);
-  if (idx >= 0) {
-    services[idx] = service;
-  } else {
-    services.push(service);
-  }
-  saveServices(services);
-}
-
-export function deleteService(id: string) {
-  const services = getServices().filter((s) => s.id !== id);
-  saveServices(services);
-}
-
-// ---- BOOKINGS ----
-export function getBookings(): Booking[] {
-  try {
-    const data = localStorage.getItem(KEYS.BOOKINGS);
-    return data ? JSON.parse(data) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function saveBookings(bookings: Booking[]) {
-  localStorage.setItem(KEYS.BOOKINGS, JSON.stringify(bookings));
-}
-
-export function getBookingsByMasterId(masterId: string): Booking[] {
-  return getBookings().filter((b) => b.master_id === masterId);
-}
-
-export function addBooking(booking: Booking) {
-  const bookings = getBookings();
-  bookings.push(booking);
-  saveBookings(bookings);
-}
-
-export function updateBookingStatus(id: string, status: Booking['status']) {
-  const bookings = getBookings();
-  const idx = bookings.findIndex((b) => b.id === id);
-  if (idx >= 0) {
-    bookings[idx].status = status;
-    saveBookings(bookings);
-  }
-}
-
-export function deleteBooking(id: string) {
-  const bookings = getBookings().filter((b) => b.id !== id);
-  saveBookings(bookings);
-}
 
 // ---- USER SESSION ----
 export function getUser(): AppUser | null {
@@ -134,7 +25,142 @@ export function clearUser() {
   localStorage.removeItem(KEYS.USER);
 }
 
-// Больше никаких автоматических Ирин Козловых!
-export function initStorage() {
-  // Оставлено пустым, чтобы не ломать импорты в других файлах
+export function initStorage() {}
+
+// ---- PROFILES (бывший masters) ----
+export async function getMasterBySlug(slug: string): Promise<Master | null> {
+  console.log('🔍 Ищем мастера по slug:', slug);
+  const { data, error } = await supabase
+    .from('profiles')        // ✅ было masters
+    .select('*')
+    .eq('slug', slug)
+    .single();
+    
+  if (error) {
+    console.error('Ошибка получения мастера по slug:', error);
+    return null;
+  }
+  return data;
+}
+
+export async function getMasterById(id: string): Promise<Master | null> {
+  console.log('🔍 Ищем мастера по id:', id);
+  const { data, error } = await supabase
+    .from('profiles')        // ✅ было masters
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) {
+    console.error('Ошибка получения мастера по id:', error);
+    return null;
+  }
+  return data;
+}
+
+export async function upsertMaster(master: Master): Promise<void> {
+  const dbMaster = {
+    id: master.id,
+    name: master.name,
+    slug: master.slug,
+    phone: master.phone,
+    telegram_chat_id: master.telegram_chat_id || '',
+    telegram_bot_token: master.telegram_bot_token || '',
+    working_hours: master.workingHours || { start: '09:00', end: '21:00' },
+    days_off: master.daysOff || [],
+    created_at: master.created_at,
+  };
+
+  console.log('💾 Сохраняем профиль в profiles:', dbMaster);
+  const { error } = await supabase
+    .from('profiles')        // ✅ было masters
+    .upsert(dbMaster);
+    
+  if (error) console.error('Ошибка сохранения профиля:', error);
+  else console.log('✅ Профиль сохранён!');
+}
+
+// ---- SERVICES ----
+export async function getServicesByMasterId(masterId: string): Promise<Service[]> {
+  console.log('🔍 Загружаем услуги для мастера:', masterId);
+  const { data, error } = await supabase
+    .from('services')        // ✅ без изменений
+    .select('*')
+    .eq('master_id', masterId);
+    
+  if (error) {
+    console.error('Ошибка получения услуг:', error);
+    return [];
+  }
+  console.log('✅ Услуги загружены:', data);
+  return data || [];
+}
+
+export async function upsertService(service: Service): Promise<void> {
+  console.log('💾 Сохраняем услугу:', service);
+  const { error } = await supabase
+    .from('services')        // ✅ без изменений
+    .upsert(service);
+    
+  if (error) {
+    console.error('Ошибка сохранения услуги:', error);
+    throw error;
+  }
+  console.log('✅ Услуга сохранена!');
+}
+
+export async function deleteService(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('services')
+    .delete()
+    .eq('id', id);
+  if (error) console.error('Ошибка удаления услуги:', error);
+}
+
+// ---- APPOINTMENTS (бывший bookings) ----
+export async function getBookingsByMasterId(masterId: string): Promise<Booking[]> {
+  console.log('🔍 Загружаем записи для мастера:', masterId);
+  const { data, error } = await supabase
+    .from('appointments')    // ✅ было bookings
+    .select('*')
+    .eq('master_id', masterId);
+    
+  if (error) {
+    console.error('Ошибка получения записей:', error);
+    return [];
+  }
+  console.log('✅ Записи загружены:', data);
+  return data || [];
+}
+
+export async function addBooking(booking: Booking): Promise<void> {
+  console.log('💾 Сохраняем запись:', booking);
+  const { error } = await supabase
+    .from('appointments')    // ✅ было bookings
+    .insert(booking);
+    
+  if (error) {
+    console.error('Ошибка создания записи:', error);
+    throw error;
+  }
+  console.log('✅ Запись создана!');
+}
+
+export async function updateBookingStatus(
+  id: string,
+  status: Booking['status']
+): Promise<void> {
+  const { error } = await supabase
+    .from('appointments')    // ✅ было bookings
+    .update({ status })
+    .eq('id', id);
+  if (error) console.error('Ошибка обновления статуса:', error);
+}
+
+export async function deleteBooking(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('appointments')    // ✅ было bookings
+    .delete()
+    .eq('id', id);
+  if (error) console.error('Ошибка удаления записи:', error);
 }
