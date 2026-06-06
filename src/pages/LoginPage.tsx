@@ -24,6 +24,14 @@ export default function LoginPage() {
     }
   }, [user, needsOnboarding, navigate]);
 
+  // Подставляем имя из Google если есть
+  useEffect(() => {
+    const googleName = sessionStorage.getItem('google_user_name');
+    if (googleName && needsOnboarding) {
+      setName(googleName);
+    }
+  }, [needsOnboarding]);
+
   const validate = () => {
     const newErrors: { name?: string; phone?: string } = {};
     if (!name.trim() || name.trim().length < 2) {
@@ -38,17 +46,16 @@ export default function LoginPage() {
 
   const handleGoogleLogin = async () => {
     setGoogleLoading(true);
-    await new Promise((r) => setTimeout(r, 800));
-    loginWithGoogle();
+    // Реальный редирект на Google — браузер уйдёт со страницы
+    await loginWithGoogle();
+    // Этот код выполнится только если произошла ошибка (редиректа не было)
     setGoogleLoading(false);
-    // navigate будет вызван через useEffect когда user обновится
   };
 
   const handleOnboardingSubmit = async () => {
     if (!validate()) return;
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 600));
-    completeOnboarding(name.trim(), phone.trim());
+    await completeOnboarding(name.trim(), phone.trim());
     setLoading(false);
     navigate('/dashboard');
   };
@@ -82,7 +89,7 @@ export default function LoginPage() {
             Войдите чтобы получить доступ к панели мастера
           </p>
 
-          {/* Google Login */}
+          {/* Google Login Button */}
           <button
             onClick={handleGoogleLogin}
             disabled={googleLoading}
@@ -98,7 +105,7 @@ export default function LoginPage() {
                 <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
               </svg>
             )}
-            {googleLoading ? 'Входим...' : 'Войти через Google'}
+            {googleLoading ? 'Переходим к Google...' : 'Войти через Google'}
           </button>
 
           <p className="text-xs text-gray-600 text-center mt-6">
@@ -109,7 +116,6 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Back to landing */}
         <div className="text-center mt-6">
           <a href="#/" className="text-gray-500 hover:text-gray-300 transition-colors text-sm">
             ← Вернуться на главную
@@ -117,7 +123,7 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* Onboarding Modal */}
+      {/* Onboarding Modal — появляется после первого входа через Google */}
       <Modal
         isOpen={needsOnboarding}
         onClose={() => {}}
@@ -126,7 +132,6 @@ export default function LoginPage() {
         <div className="space-y-4">
           <p className="text-gray-500 text-sm">
             Вы входите впервые. Заполните профиль — это займёт 30 секунд.
-            Данные сохранятся в вашем браузере.
           </p>
 
           <div className="relative">

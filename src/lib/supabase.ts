@@ -16,8 +16,9 @@ export const supabase: SupabaseClient = createClient(
   supabaseAnonKey,
   {
     auth: {
-      persistSession: false,
-      autoRefreshToken: false,
+      // ✅ ВКЛЮЧАЕМ — без этого Google OAuth не работает (сессия теряется после редиректа)
+      persistSession: true,
+      autoRefreshToken: true,
     },
   }
 );
@@ -25,14 +26,14 @@ export const supabase: SupabaseClient = createClient(
 async function testSupabaseConnection(): Promise<void> {
   try {
     const { error } = await supabase
-      .from('profiles')  // ✅ было 'masters' — исправлено
+      .from('profiles')
       .select('id')
       .limit(1);
 
     if (error && error.code !== 'PGRST116') {
       console.warn('⚠️ Supabase ответил с ошибкой:', error.message);
     } else {
-      console.log('✅ Успешное подключение к Supabase на фронтенде!');
+      console.log('✅ Успешное подключение к Supabase!');
       console.log('📡 URL:', supabaseUrl);
     }
   } catch (err) {
