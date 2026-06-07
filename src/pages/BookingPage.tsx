@@ -1,4 +1,3 @@
-// src/pages/BookingPage.tsx
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -14,7 +13,7 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { PhoneInput, isPhoneComplete } from '../components/ui/PhoneInput';
 
-const SLOT_INTERVAL = 30; // минут — шаг сетки, строго совпадает с DashboardPage
+const SLOT_INTERVAL = 30;
 
 function generateId() {
   return `booking-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -57,42 +56,28 @@ function getMonthMatrix(year: number, month: number): (Date | null)[][] {
   return matrix;
 }
 
-/**
- * Переводим "HH:MM" в минуты от полуночи.
- */
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(':').map(Number);
   return h * 60 + m;
 }
 
-/**
- * Переводим минуты от полуночи обратно в "HH:MM".
- */
 function minutesToTime(totalMinutes: number): string {
   const h = Math.floor(totalMinutes / 60);
   const m = totalMinutes % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-/**
- * Сколько слотов по SLOT_INTERVAL минут занимает услуга.
- * duration=100 → ceil(100/30)=4 слота
- */
 function getSlotsCount(durationMinutes: number): number {
   return Math.ceil(durationMinutes / SLOT_INTERVAL);
 }
 
-/**
- * Возвращает ВСЕ слоты (строки "HH:MM"), которые будет занимать запись
- * если она начинается в startTime и длится durationMinutes.
- */
 function getOccupiedSlotsByBooking(startTime: string, durationMinutes: number): string[] {
   const startMin = timeToMinutes(startTime);
   const slotsCount = getSlotsCount(durationMinutes);
   const occupiedSlots: string[] = [];
   for (let i = 0; i < slotsCount; i++) {
     const slotMin = startMin + i * SLOT_INTERVAL;
-    if (slotMin >= 24 * 60) break; // не выходим за полночь
+    if (slotMin >= 24 * 60) break;
     occupiedSlots.push(minutesToTime(slotMin));
   }
   return occupiedSlots;
@@ -138,16 +123,12 @@ export default function BookingPage() {
       const foundMaster = await getMasterBySlug(master_slug);
       if (!foundMaster) { setNotFound(true); return; }
 
-      const formattedMaster = {
-        ...foundMaster,
-        workingHours: (foundMaster as any).working_hours || foundMaster.workingHours || { start: '00:00', end: '23:30' },
-        daysOff: (foundMaster as any).days_off || foundMaster.daysOff || []
-      };
+      // ✅ ИСПРАВЛЕНИЕ: normalizeMaster уже всё маппит правильно,
+      // просто используем foundMaster напрямую без перезаписи полей
+      setMaster(foundMaster);
 
-      setMaster(formattedMaster);
-
-      const masterServices = await getServicesByMasterId(formattedMaster.id);
-      const masterBookings = await getBookingsByMasterId(formattedMaster.id);
+      const masterServices = await getServicesByMasterId(foundMaster.id);
+      const masterBookings = await getBookingsByMasterId(foundMaster.id);
       setServices(masterServices);
       setExistingBookings(masterBookings);
     }
@@ -155,10 +136,6 @@ export default function BookingPage() {
     fetchMasterData();
   }, [master_slug]);
 
-  /**
-   * Генерирует все доступные слоты в рабочем диапазоне мастера.
-   * Шаг строго SLOT_INTERVAL (30 мин).
-   */
   const getMasterTimeSlots = (): string[] => {
     const workHours = master?.workingHours;
 
@@ -197,56 +174,29 @@ export default function BookingPage() {
   const allSlots = getMasterTimeSlots();
   const matrixDates = getMonthMatrix(calendarYear, calendarMonth);
 
-  /**
-   * Возвращает SET всех заблокированных слотов на дату.
-   * Учитывает длительность каждой существующей записи:
-   * запись в 10:00 на 100 мин блокирует 10:00, 10:30, 11:00, 11:30
-   */
   const getBlockedSlotsForDate = (dateStr: string): Set<string> => {
     const blocked = new Set<string>();
-
     existingBookings
-      .filter((b) => b.date === dateStr && b.status !== 'cancelled')
-      .forEach((b) => {
-        // Ищем длительность услуги этой записи
+      .filter(b => b.date === dateStr && b.status !== 'cancelled')
+      .forEach(b => {
         const service = services.find(s => s.id === b.service_id);
         const duration = service?.duration ?? SLOT_INTERVAL;
-        // Все слоты, которые занимает эта запись
-        const occupiedSlots = getOccupiedSlotsByBooking(b.time, duration);
-        occupiedSlots.forEach(slot => blocked.add(slot));
+        getOccupiedSlotsByBooking(b.time, duration).forEach(slot => blocked.add(slot));
       });
-
     return blocked;
   };
 
-  /**
-   * Проверяет: можно ли записаться на выбранный слот с учётом длительности НОВОЙ услуги.
-   * Слот заблокирован если:
-   * 1. Какая-то существующая запись занимает этот слот (прямо или из-за своей длительности)
-   * 2. НОВАЯ запись в этот слот выйдет за рамки рабочего времени
-   * 3. НОВАЯ запись в этот слот перекроет какую-то существующую запись
-   */
   const isSlotBlocked = (time: string, dateStr: string): boolean => {
     if (!selectedService) return false;
-
     const blockedByExisting = getBlockedSlotsForDate(dateStr);
-
-    // Проверяем все слоты, которые займёт новая запись
     const newBookingSlots = getOccupiedSlotsByBooking(time, selectedService.duration);
-
     for (const slot of newBookingSlots) {
-      // Слот занят существующей записью
       if (blockedByExisting.has(slot)) return true;
-      // Слот выходит за рамки рабочего времени
       if (!allSlots.includes(slot)) return true;
     }
-
     return false;
   };
 
-  /**
-   * Проверяет: прошёл ли этот слот по времени (для сегодняшней даты).
-   */
   const isPastSlot = (time: string): boolean => {
     if (!selectedDate) return false;
     const now = new Date();
@@ -256,10 +206,6 @@ export default function BookingPage() {
     return d <= now;
   };
 
-  /**
-   * Проверяет: все ли слоты дня заняты (для окрашивания дней в календаре).
-   * Учитывает длительность выбранной услуги.
-   */
   const isDayFullyBooked = (dateStr: string): boolean => {
     if (!selectedService) return false;
     return allSlots.every(slot => isSlotBlocked(slot, dateStr) || isPastSlot(slot));
@@ -293,9 +239,13 @@ export default function BookingPage() {
     await addBooking(booking);
     setCreatedBooking(booking);
 
-    if (master.telegram_chat_id) {
+    // ✅ Используем telegram_id (из бота) или telegram_chat_id (ручной ввод)
+    const telegramTarget = master.telegram_id || master.telegram_chat_id;
+    console.log('📲 Отправляем уведомление на:', telegramTarget);
+
+    if (telegramTarget) {
       await sendTelegramNotification(
-        master.telegram_chat_id,
+        telegramTarget,
         {
           clientName: booking.client_name,
           clientPhone: booking.client_phone,
@@ -303,9 +253,10 @@ export default function BookingPage() {
           date: formatDateRU(selectedDate),
           time: booking.time,
           masterName: master.name,
-        },
-        master.telegram_bot_token
+        }
       );
+    } else {
+      console.warn('⚠️ Telegram не подключён — уведомление не отправлено');
     }
 
     setLoading(false);
@@ -509,7 +460,6 @@ export default function BookingPage() {
                     const isSelected = selectedDate && dateToStr(d) === dateToStr(selectedDate);
                     const isToday = dateToStr(d) === dateToStr(today);
                     const dayOff = isDayOff(d);
-                    // Теперь проверяем с учётом длительности выбранной услуги
                     const fullyBooked = isDayFullyBooked(dateToStr(d));
                     const disabled = isPast || fullyBooked || dayOff;
 
@@ -562,7 +512,6 @@ export default function BookingPage() {
                     <div className="grid grid-cols-3 gap-3 overflow-y-auto pr-2 pb-2 custom-scrollbar">
                       {allSlots.map((slot) => {
                         const dateStr = dateToStr(selectedDate);
-                        // Блокируем с учётом длительности выбранной услуги
                         const blocked = isSlotBlocked(slot, dateStr);
                         const past = isPastSlot(slot);
                         const disabled = blocked || past;
