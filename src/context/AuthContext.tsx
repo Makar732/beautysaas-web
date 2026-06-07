@@ -8,6 +8,9 @@ interface AuthContextType {
   user: AppUser | null;
   isAuthenticated: boolean;
   needsOnboarding: boolean;
+  isPremium: boolean;
+  isTrialActive: boolean;
+  trialDaysLeft: number;
   loginAsGuest: () => void;
   loginWithGoogle: () => Promise<void>;
   completeOnboarding: (name: string, phone: string) => Promise<void>;
@@ -17,6 +20,19 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+/**
+ * Проверяет активен ли триал (14 дней с даты регистрации).
+ */
+function checkTrial(trialStartDate?: string): { isActive: boolean; daysLeft: number } {
+  if (!trialStartDate) return { isActive: true, daysLeft: 14 };
+  const start = new Date(trialStartDate);
+  const now = new Date();
+  const diffMs = now.getTime() - start.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const daysLeft = Math.max(0, 14 - diffDays);
+  return { isActive: daysLeft > 0, daysLeft };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
@@ -24,27 +40,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     initStorage();
 
-    // Шаг 1: Проверяем localStorage (быстрый старт для обычных пользователей)
+    // Шаг 1: Быстрый старт из localStorage
     const savedUser = getUser();
     if (savedUser) {
       setUser(savedUser);
     }
 
-    // Шаг 2: Слушаем сессию Supabase (для Google OAuth)
-    // Срабатывает когда пользователь возвращается после редиректа от Google
+    // Шаг 2: Слушаем Google OAuth редирект
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('🔐 Auth event:', event, session?.user?.email);
 
         if (event === 'SIGNED_IN' && session?.user) {
           const googleUser = session.user;
-          const googleId = googleUser.id; // UUID от Supabase Auth
+          const googleId = googleUser.id;
 
-          // Проверяем: есть ли уже профиль этого пользователя в БД
           const existingMaster = await getMasterById(googleId);
 
           if (existingMaster) {
-            // ✅ Пользователь уже регистрировался — просто входим
             console.log('✅ Найден существующий профиль:', existingMaster.name);
             const appUser: AppUser = {
               id: existingMaster.id,
@@ -54,6 +67,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               isGuest: false,
               telegram_chat_id: existingMaster.telegram_chat_id || '',
               telegram_bot_token: existingMaster.telegram_bot_token || '',
+              telegram_id: existingMaster.telegram_id || '',
+              trial_start_date: existingMaster.trial_start_date,
+              is_premium: existingMaster.is_premium || false,
               workingHours: existingMaster.workingHours || { start: '09:00', end: '21:00' },
               daysOff: existingMaster.daysOff || [],
             };
@@ -61,10 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setUser(appUser);
             setNeedsOnboarding(false);
           } else {
-            // 🆕 Новый пользователь — нужен онбординг (имя + телефон)
-            console.log('🆕 Новый пользователь через Google, нужен онбординг');
-            // Сохраняем Google ID во временное хранилище
-            // чтобы потом использовать в completeOnboarding
+            console.log('🆕 Новый пользователь, нужен онбординг');
             sessionStorage.setItem('google_user_id', googleId);
             sessionStorage.setItem('google_user_email', googleUser.email || '');
             sessionStorage.setItem(
@@ -83,40 +96,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     );
 
-    // Отписываемся при размонтировании
-    return () => {
-      subscription.unsubscribe();
-    };
+    return () => subscription.unsubscribe();
   }, []);
 
   const loginAsGuest = () => {};
 
-  // ✅ Реальный Google OAuth — редирект на страницу Google
   const loginWithGoogle = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        // После авторизации Google редиректит сюда
         redirectTo: `${window.location.origin}/`,
       },
     });
-
-    if (error) {
-      console.error('❌ Ошибка Google OAuth:', error.message);
-    }
-    // Браузер автоматически переходит на страницу Google
-    // После входа — возвращается на redirectTo
-    // Там срабатывает onAuthStateChange выше
+    if (error) console.error('❌ Ошибка Google OAuth:', error.message);
   };
 
-  // Вызывается после Google OAuth когда новый пользователь заполняет имя и телефон
   const completeOnboarding = async (name: string, phone: string) => {
-    // Получаем Google ID из sessionStorage (сохранили в onAuthStateChange)
     const googleId = sessionStorage.getItem('google_user_id');
-
-    // Если пришли через Google — используем его ID, иначе генерируем новый
     const id = googleId || `master-${Date.now()}`;
     const slug = generateSlug(name);
+    const trialStartDate = new Date().toISOString();
 
     const newUser: AppUser = {
       id,
@@ -126,10 +125,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isGuest: false,
       telegram_chat_id: '',
       telegram_bot_token: '',
-      workingHours: {
-        start: '09:00',
-        end: '21:00',
-      },
+      telegram_id: '',
+      trial_start_date: trialStartDate,
+      is_premium: false,
+      workingHours: { start: '09:00', end: '21:00' },
       daysOff: [],
     };
 
@@ -140,6 +139,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       phone: newUser.phone,
       telegram_chat_id: '',
       telegram_bot_token: '',
+      telegram_id: '',
+      trial_start_date: trialStartDate,
+      is_premium: false,
       workingHours: newUser.workingHours!,
       daysOff: newUser.daysOff!,
       created_at: new Date().toISOString(),
@@ -150,16 +152,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(newUser);
     setNeedsOnboarding(false);
 
-    // Очищаем временные данные
     sessionStorage.removeItem('google_user_id');
     sessionStorage.removeItem('google_user_email');
     sessionStorage.removeItem('google_user_name');
   };
 
   const logout = async () => {
-    // Выходим из Supabase Auth (Google сессия)
     await supabase.auth.signOut();
-    // Очищаем localStorage
     clearUser();
     setUser(null);
     setNeedsOnboarding(false);
@@ -176,6 +175,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       phone: updated.phone,
       telegram_chat_id: updated.telegram_chat_id || '',
       telegram_bot_token: updated.telegram_bot_token || '',
+      telegram_id: updated.telegram_id || '',
+      trial_start_date: updated.trial_start_date,
+      is_premium: updated.is_premium || false,
       workingHours: updated.workingHours || { start: '09:00', end: '21:00' },
       daysOff: updated.daysOff || [],
       created_at: new Date().toISOString(),
@@ -185,11 +187,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(updated);
   };
 
+  // Вычисляем статус триала и премиума
+  const { isActive: isTrialActive, daysLeft: trialDaysLeft } = checkTrial(user?.trial_start_date);
+  const isPremium = user?.is_premium || false;
+
   return (
     <AuthContext.Provider value={{
       user,
       isAuthenticated: !!user,
       needsOnboarding,
+      isPremium,
+      isTrialActive,
+      trialDaysLeft,
       loginAsGuest,
       loginWithGoogle,
       completeOnboarding,

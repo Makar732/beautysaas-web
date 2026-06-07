@@ -6,6 +6,9 @@ export interface AppUser {
   isGuest: boolean;
   telegram_chat_id?: string;
   telegram_bot_token?: string;
+  telegram_id?: string;        // ID из Telegram бота (привязка через /start)
+  trial_start_date?: string;   // ISO дата начала триала
+  is_premium?: boolean;        // Платный тариф
   workingHours?: {
     start: string;
     end: string;
@@ -20,6 +23,9 @@ export interface Master {
   phone: string;
   telegram_chat_id?: string;
   telegram_bot_token?: string;
+  telegram_id?: string;        // ID из Telegram бота
+  trial_start_date?: string;   // ISO дата начала триала
+  is_premium?: boolean;        // Платный тариф
   workingHours?: {
     start: string;
     end: string;
@@ -44,8 +50,8 @@ export interface Booking {
   service_name: string;
   client_name: string;
   client_phone: string;
-  date: string; // ✅ Строго 'YYYY-MM-DD'
-  time: string;
+  date: string; // Строго 'YYYY-MM-DD'
+  time: string; // Строго 'HH:MM'
   status: 'pending' | 'confirmed' | 'cancelled';
   created_at: string;
 }

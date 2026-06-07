@@ -27,26 +27,26 @@ export function clearUser() {
 
 export function initStorage() {}
 
-// ---- PROFILES (бывший masters) ----
+// ---- PROFILES ----
 export async function getMasterBySlug(slug: string): Promise<Master | null> {
   console.log('🔍 Ищем мастера по slug:', slug);
   const { data, error } = await supabase
-    .from('profiles')        // ✅ было masters
+    .from('profiles')
     .select('*')
     .eq('slug', slug)
     .single();
-    
+
   if (error) {
     console.error('Ошибка получения мастера по slug:', error);
     return null;
   }
-  return data;
+  return normalizeMaster(data);
 }
 
 export async function getMasterById(id: string): Promise<Master | null> {
   console.log('🔍 Ищем мастера по id:', id);
   const { data, error } = await supabase
-    .from('profiles')        // ✅ было masters
+    .from('profiles')
     .select('*')
     .eq('id', id)
     .single();
@@ -55,7 +55,29 @@ export async function getMasterById(id: string): Promise<Master | null> {
     console.error('Ошибка получения мастера по id:', error);
     return null;
   }
-  return data;
+  return normalizeMaster(data);
+}
+
+/**
+ * Нормализует сырые данные из Supabase в объект Master.
+ * Supabase хранит working_hours/days_off в snake_case,
+ * а приложение использует camelCase.
+ */
+function normalizeMaster(data: any): Master {
+  return {
+    id: data.id,
+    name: data.name,
+    slug: data.slug,
+    phone: data.phone,
+    telegram_chat_id: data.telegram_chat_id || '',
+    telegram_bot_token: data.telegram_bot_token || '',
+    telegram_id: data.telegram_id || '',
+    trial_start_date: data.trial_start_date || new Date().toISOString(),
+    is_premium: data.is_premium || false,
+    workingHours: data.working_hours || { start: '09:00', end: '21:00' },
+    daysOff: data.days_off || [],
+    created_at: data.created_at,
+  };
 }
 
 export async function upsertMaster(master: Master): Promise<void> {
@@ -66,16 +88,19 @@ export async function upsertMaster(master: Master): Promise<void> {
     phone: master.phone,
     telegram_chat_id: master.telegram_chat_id || '',
     telegram_bot_token: master.telegram_bot_token || '',
+    telegram_id: master.telegram_id || '',
+    trial_start_date: master.trial_start_date || new Date().toISOString(),
+    is_premium: master.is_premium || false,
     working_hours: master.workingHours || { start: '09:00', end: '21:00' },
     days_off: master.daysOff || [],
     created_at: master.created_at,
   };
 
-  console.log('💾 Сохраняем профиль в profiles:', dbMaster);
+  console.log('💾 Сохраняем профиль:', dbMaster);
   const { error } = await supabase
-    .from('profiles')        // ✅ было masters
+    .from('profiles')
     .upsert(dbMaster);
-    
+
   if (error) console.error('Ошибка сохранения профиля:', error);
   else console.log('✅ Профиль сохранён!');
 }
@@ -84,10 +109,10 @@ export async function upsertMaster(master: Master): Promise<void> {
 export async function getServicesByMasterId(masterId: string): Promise<Service[]> {
   console.log('🔍 Загружаем услуги для мастера:', masterId);
   const { data, error } = await supabase
-    .from('services')        // ✅ без изменений
+    .from('services')
     .select('*')
     .eq('master_id', masterId);
-    
+
   if (error) {
     console.error('Ошибка получения услуг:', error);
     return [];
@@ -99,9 +124,9 @@ export async function getServicesByMasterId(masterId: string): Promise<Service[]
 export async function upsertService(service: Service): Promise<void> {
   console.log('💾 Сохраняем услугу:', service);
   const { error } = await supabase
-    .from('services')        // ✅ без изменений
+    .from('services')
     .upsert(service);
-    
+
   if (error) {
     console.error('Ошибка сохранения услуги:', error);
     throw error;
@@ -117,14 +142,14 @@ export async function deleteService(id: string): Promise<void> {
   if (error) console.error('Ошибка удаления услуги:', error);
 }
 
-// ---- APPOINTMENTS (бывший bookings) ----
+// ---- APPOINTMENTS ----
 export async function getBookingsByMasterId(masterId: string): Promise<Booking[]> {
   console.log('🔍 Загружаем записи для мастера:', masterId);
   const { data, error } = await supabase
-    .from('appointments')    // ✅ было bookings
+    .from('appointments')
     .select('*')
     .eq('master_id', masterId);
-    
+
   if (error) {
     console.error('Ошибка получения записей:', error);
     return [];
@@ -136,9 +161,9 @@ export async function getBookingsByMasterId(masterId: string): Promise<Booking[]
 export async function addBooking(booking: Booking): Promise<void> {
   console.log('💾 Сохраняем запись:', booking);
   const { error } = await supabase
-    .from('appointments')    // ✅ было bookings
+    .from('appointments')
     .insert(booking);
-    
+
   if (error) {
     console.error('Ошибка создания записи:', error);
     throw error;
@@ -151,7 +176,7 @@ export async function updateBookingStatus(
   status: Booking['status']
 ): Promise<void> {
   const { error } = await supabase
-    .from('appointments')    // ✅ было bookings
+    .from('appointments')
     .update({ status })
     .eq('id', id);
   if (error) console.error('Ошибка обновления статуса:', error);
@@ -159,7 +184,7 @@ export async function updateBookingStatus(
 
 export async function deleteBooking(id: string): Promise<void> {
   const { error } = await supabase
-    .from('appointments')    // ✅ было bookings
+    .from('appointments')
     .delete()
     .eq('id', id);
   if (error) console.error('Ошибка удаления записи:', error);
