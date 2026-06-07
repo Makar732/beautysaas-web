@@ -1,7 +1,6 @@
 import { supabase } from './supabase';
 import { Master, Service, Booking, AppUser } from '../types';
 
-export const TELEGRAM_BOT_TOKEN = '8965287155:AAEP5Or8_1d0M-Jvwo2hDWGQnoKR5e4zSv4';
 
 const KEYS = {
   USER: 'beauty_saas_user',

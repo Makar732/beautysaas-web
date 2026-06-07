@@ -1,5 +1,3 @@
-import { TELEGRAM_BOT_TOKEN } from './storage';
-
 interface TelegramNotificationData {
   clientName: string;
   clientPhone: string;
@@ -10,56 +8,43 @@ interface TelegramNotificationData {
 }
 
 /**
- * Отправляет уведомление мастеру в Telegram о новой записи.
- * Использует telegram_id (Chat ID полученный через /start в боте).
+ * Отправляет уведомление мастеру в Telegram через серверный endpoint.
+ * Токен бота НЕ передаётся в браузер — всё безопасно на сервере.
  */
 export async function sendTelegramNotification(
-  telegramId: string, // telegram_id из profiles (не telegram_chat_id!)
-  data: TelegramNotificationData,
-  botToken?: string
+  telegramId: string,
+  data: TelegramNotificationData
 ): Promise<boolean> {
-  const token = botToken || TELEGRAM_BOT_TOKEN;
-
-  if (!token || token === 'YOUR_TELEGRAM_BOT_TOKEN_HERE') {
-    console.warn('[BeautySaaS] Telegram Bot Token не настроен.');
-    return false;
-  }
-
   if (!telegramId) {
-    console.warn('[BeautySaaS] Telegram ID мастера не указан (бот не подключён).');
+    console.warn('[BeautySaaS] Telegram ID не указан');
     return false;
   }
-
-  const text =
-    `🌸 <b>Новая запись!</b> 💅\n\n` +
-    `👤 <b>Клиент:</b> ${data.clientName}\n` +
-    `📞 <b>Телефон:</b> ${data.clientPhone}\n` +
-    `✨ <b>Услуга:</b> ${data.serviceName}\n` +
-    `📅 <b>Дата:</b> ${data.date}\n` +
-    `🕐 <b>Время:</b> ${data.time}\n\n` +
-    `<i>Уведомление от BeautySaaS</i>`;
 
   try {
-    const url = `https://api.telegram.org/bot${token}/sendMessage`;
-    const response = await fetch(url, {
+    const response = await fetch('/api/send-notification', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        chat_id: telegramId, // ✅ используем telegram_id
-        text,
-        parse_mode: 'HTML',
+        telegram_id: telegramId,
+        booking: data,
       }),
     });
 
-    const result = await response.json();
-    if (!result.ok) {
-      console.error('[BeautySaaS] Ошибка отправки в Telegram:', result);
+    if (!response.ok) {
+      console.error('[BeautySaaS] Ошибка сервера при отправке уведомления');
       return false;
     }
-    console.log('[BeautySaaS] ✅ Уведомление отправлено в Telegram!');
+
+    const result = await response.json();
+    if (!result.success) {
+      console.error('[BeautySaaS] Не удалось отправить уведомление');
+      return false;
+    }
+
+    console.log('[BeautySaaS] ✅ Уведомление отправлено!');
     return true;
   } catch (error) {
-    console.error('[BeautySaaS] Ошибка сети при отправке в Telegram:', error);
+    console.error('[BeautySaaS] Ошибка сети:', error);
     return false;
   }
 }

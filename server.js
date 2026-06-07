@@ -9,23 +9,19 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware для парсинга JSON (нужен для Telegram webhook)
 app.use(express.json());
 
-// ===== TELEGRAM BOT WEBHOOK =====
+// ===== TELEGRAM CONFIG =====
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || '';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-/**
- * Отправляет сообщение в Telegram
- */
 async function sendTelegramMessage(chatId, text) {
   if (!TELEGRAM_BOT_TOKEN) {
-    console.error('❌ TELEGRAM_BOT_TOKEN не задан в переменных окружения');
-    return;
+    console.error('❌ TELEGRAM_BOT_TOKEN не задан');
+    return false;
   }
   try {
     const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -41,21 +37,46 @@ async function sendTelegramMessage(chatId, text) {
     const data = await res.json();
     if (!data.ok) {
       console.error('❌ Ошибка отправки в Telegram:', data);
+      return false;
     }
+    return true;
   } catch (error) {
     console.error('❌ Ошибка сети при отправке в Telegram:', error);
+    return false;
   }
 }
 
-/**
- * Обработчик Telegram Webhook
- * Принимает обновления от Telegram и обрабатывает команду /start
- */
+// ===== API ENDPOINT: Отправка уведомлений (защищено на сервере) =====
+app.post('/api/send-notification', async (req, res) => {
+  const { telegram_id, booking } = req.body;
+
+  if (!telegram_id || !booking) {
+    return res.status(400).json({ error: 'Missing telegram_id or booking data' });
+  }
+
+  const text =
+    `🌸 <b>Новая запись!</b> 💅\n\n` +
+    `👤 <b>Клиент:</b> ${booking.clientName}\n` +
+    `📞 <b>Телефон:</b> ${booking.clientPhone}\n` +
+    `✨ <b>Услуга:</b> ${booking.serviceName}\n` +
+    `📅 <b>Дата:</b> ${booking.date}\n` +
+    `🕐 <b>Время:</b> ${booking.time}\n\n` +
+    `<i>Уведомление от BeautySaaS</i>`;
+
+  const success = await sendTelegramMessage(telegram_id, text);
+
+  if (success) {
+    res.json({ success: true });
+  } else {
+    res.status(500).json({ error: 'Failed to send Telegram notification' });
+  }
+});
+
+// ===== TELEGRAM BOT WEBHOOK =====
 app.post('/webhook/telegram', async (req, res) => {
   try {
     const update = req.body;
 
-    // Игнорируем если нет сообщения
     if (!update.message || !update.message.text) {
       return res.sendStatus(200);
     }
@@ -66,11 +87,9 @@ app.post('/webhook/telegram', async (req, res) => {
 
     console.log(`📩 Получено сообщение от ${chatId}: ${text}`);
 
-    // Обрабатываем команду /start с параметром ID мастера
     if (text.startsWith('/start')) {
       const parts = text.split(' ');
-      
-      // Если нет параметра — это общий /start
+
       if (parts.length === 1) {
         await sendTelegramMessage(
           chatId,
@@ -85,10 +104,8 @@ app.post('/webhook/telegram', async (req, res) => {
         return res.sendStatus(200);
       }
 
-      // Параметр = ID мастера (например: /start master-123)
       const masterId = parts[1];
 
-      // Проверяем существует ли мастер в БД
       const { data: profile, error } = await supabase
         .from('profiles')
         .select('id, name, telegram_id')
@@ -105,7 +122,6 @@ app.post('/webhook/telegram', async (req, res) => {
         return res.sendStatus(200);
       }
 
-      // Проверяем: уже подключён?
       if (profile.telegram_id && profile.telegram_id === String(chatId)) {
         await sendTelegramMessage(
           chatId,
@@ -115,7 +131,6 @@ app.post('/webhook/telegram', async (req, res) => {
         return res.sendStatus(200);
       }
 
-      // Сохраняем telegram_id мастера в БД
       const { error: updateError } = await supabase
         .from('profiles')
         .update({ telegram_id: String(chatId) })
@@ -130,7 +145,6 @@ app.post('/webhook/telegram', async (req, res) => {
         return res.sendStatus(200);
       }
 
-      // Успех!
       console.log(`✅ Telegram подключён для мастера ${profile.name} (${masterId})`);
       await sendTelegramMessage(
         chatId,
@@ -142,7 +156,6 @@ app.post('/webhook/telegram', async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // Другие команды — игнорируем
     res.sendStatus(200);
   } catch (error) {
     console.error('❌ Ошибка в Telegram webhook:', error);
@@ -160,14 +173,16 @@ app.get('*', (req, res) => {
 // ===== ЗАПУСК СЕРВЕРА =====
 app.listen(PORT, async () => {
   console.log(`✅ Сервер запущен на порту ${PORT}`);
-  
-  // Устанавливаем webhook для Telegram при старте сервера
+
   if (TELEGRAM_BOT_TOKEN) {
-    const RAILWAY_URL = process.env.RAILWAY_STATIC_URL || process.env.RAILWAY_PUBLIC_DOMAIN;
-    
+    const RAILWAY_URL =
+      process.env.RAILWAY_STATIC_URL ||
+      process.env.RAILWAY_PUBLIC_DOMAIN ||
+      process.env.RAILWAY_GEN_PUBLIC_DOMAIN;
+
     if (RAILWAY_URL) {
       const webhookUrl = `https://${RAILWAY_URL}/webhook/telegram`;
-      
+
       try {
         const res = await fetch(
           `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook`,
@@ -178,7 +193,7 @@ app.listen(PORT, async () => {
           }
         );
         const data = await res.json();
-        
+
         if (data.ok) {
           console.log(`✅ Telegram webhook установлен: ${webhookUrl}`);
         } else {
@@ -188,7 +203,7 @@ app.listen(PORT, async () => {
         console.error('❌ Ошибка при установке webhook:', error);
       }
     } else {
-      console.warn('⚠️ RAILWAY_STATIC_URL не задан — webhook не установлен (норма для локальной разработки)');
+      console.warn('⚠️ RAILWAY_URL не задан — webhook не установлен (норма для локалки)');
     }
   } else {
     console.warn('⚠️ TELEGRAM_BOT_TOKEN не задан — Telegram бот отключён');
