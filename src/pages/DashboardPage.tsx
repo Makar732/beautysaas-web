@@ -150,7 +150,7 @@ export default function DashboardPage() {
   const bookingLink = `${window.location.origin}/#/book/${masterSlug}`;
 
   // Telegram bot link с уникальным параметром мастера
-  const TELEGRAM_BOT_USERNAME = 'YourBeautySaaSBot'; // 👈 замени на username своего бота
+  const TELEGRAM_BOT_USERNAME = 'Beauty_SaaSbot'; // 👈 замени на username своего бота
   const telegramBotLink = `https://t.me/${TELEGRAM_BOT_USERNAME}?start=${masterId}`;
 
   const copyLink = async () => {
