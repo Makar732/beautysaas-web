@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import type { Provider } from '@supabase/supabase-js';
 import { AppUser } from '../types';
 import { getUser, saveUser, clearUser, upsertMaster, getMasterById, initStorage } from '../lib/storage';
 import { generateSlug } from '../lib/transliterate';
@@ -83,7 +84,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.log('🆕 Новый пользователь, нужен онбординг');
             sessionStorage.setItem('oauth_user_id', userId);
             sessionStorage.setItem('oauth_user_email', authUser.email || '');
-            // Пробуем вытащить имя из метаданных OAuth (Яндекс/VK передают разные поля)
             const rawName =
               authUser.user_metadata?.full_name ||
               authUser.user_metadata?.name ||
@@ -109,10 +109,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   /**
    * Авторизация через Яндекс OAuth.
+   * Каст через unknown нужен для совместимости со старыми типами @supabase/supabase-js,
+   * где 'yandex' ещё не включён в union-тип Provider.
    */
   const loginWithYandex = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'yandex',
+      provider: 'yandex' as unknown as Provider,
       options: {
         redirectTo: `${window.location.origin}/`,
       },
@@ -122,10 +124,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   /**
    * Авторизация через VK OAuth.
+   * Каст через unknown нужен для совместимости со старыми типами @supabase/supabase-js,
+   * где 'vk' ещё не включён в union-тип Provider.
    */
   const loginWithVK = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'vk',
+      provider: 'vk' as unknown as Provider,
       options: {
         redirectTo: `${window.location.origin}/`,
       },
@@ -135,7 +139,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   /**
    * Вход по email + пароль.
-   * Возвращает { error } если что-то пошло не так.
    */
   const loginWithEmail = async (
     email: string,
@@ -151,8 +154,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   /**
    * Регистрация по email + пароль.
-   * После signUp Supabase автоматически тригернет SIGNED_IN → onAuthStateChange → онбординг.
-   * Возвращает { error } если что-то пошло не так.
    */
   const registerWithEmail = async (
     email: string,
@@ -167,7 +168,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const completeOnboarding = async (name: string, phone: string) => {
-    // Поддерживаем оба ключа: старый google_user_id и новый oauth_user_id
     const userId =
       sessionStorage.getItem('oauth_user_id') ||
       sessionStorage.getItem('google_user_id') ||
@@ -211,7 +211,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(newUser);
     setNeedsOnboarding(false);
 
-    // Чистим оба варианта ключей
     sessionStorage.removeItem('oauth_user_id');
     sessionStorage.removeItem('oauth_user_email');
     sessionStorage.removeItem('oauth_user_name');
