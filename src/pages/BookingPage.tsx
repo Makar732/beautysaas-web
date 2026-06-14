@@ -14,6 +14,7 @@ import { Input } from '../components/ui/Input';
 import { PhoneInput, isPhoneComplete } from '../components/ui/PhoneInput';
 
 const SLOT_INTERVAL = 30;
+const FREE_BOOKINGS_LIMIT = 30;
 
 function generateId() {
   return `booking-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -64,7 +65,7 @@ function timeToMinutes(time: string): number {
 function minutesToTime(totalMinutes: number): string {
   const h = Math.floor(totalMinutes / 60);
   const m = totalMinutes % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '00')}`;
 }
 
 function getSlotsCount(durationMinutes: number): number {
@@ -101,6 +102,9 @@ export default function BookingPage() {
   const [existingBookings, setExistingBookings] = useState<Booking[]>([]);
   const [step, setStep] = useState<Step>('service');
 
+  // Флаг лимита 30 записей/месяц для бесплатного тарифа
+  const [isBookingLimitReached, setIsBookingLimitReached] = useState(false);
+
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
@@ -123,14 +127,25 @@ export default function BookingPage() {
       const foundMaster = await getMasterBySlug(master_slug);
       if (!foundMaster) { setNotFound(true); return; }
 
-      // ✅ ИСПРАВЛЕНИЕ: normalizeMaster уже всё маппит правильно,
-      // просто используем foundMaster напрямую без перезаписи полей
       setMaster(foundMaster);
 
       const masterServices = await getServicesByMasterId(foundMaster.id);
       const masterBookings = await getBookingsByMasterId(foundMaster.id);
       setServices(masterServices);
       setExistingBookings(masterBookings);
+
+      // Проверяем лимит 30 записей/месяц для бесплатного тарифа
+      if (!foundMaster.is_premium) {
+        const now = new Date();
+        const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const monthBookingsCount = masterBookings.filter(
+          b => b.date.startsWith(monthPrefix) && b.status !== 'cancelled'
+        ).length;
+
+        if (monthBookingsCount >= FREE_BOOKINGS_LIMIT) {
+          setIsBookingLimitReached(true);
+        }
+      }
     }
 
     fetchMasterData();
@@ -143,7 +158,7 @@ export default function BookingPage() {
       const slots: string[] = [];
       for (let h = 0; h < 24; h++) {
         for (let m = 0; m < 60; m += SLOT_INTERVAL) {
-          slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+          slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '00')}`);
         }
       }
       return slots;
@@ -160,7 +175,7 @@ export default function BookingPage() {
         const endTotal = endH * 60 + endM;
         if (totalMinutes < startTotal) continue;
         if (totalMinutes > endTotal) continue;
-        slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+        slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '00')}`);
       }
     }
     return slots;
@@ -239,7 +254,6 @@ export default function BookingPage() {
     await addBooking(booking);
     setCreatedBooking(booking);
 
-    // ✅ Используем telegram_id (из бота) или telegram_chat_id (ручной ввод)
     const telegramTarget = master.telegram_id || master.telegram_chat_id;
     console.log('📲 Отправляем уведомление на:', telegramTarget);
 
@@ -269,6 +283,7 @@ export default function BookingPage() {
   const stepIndex = { service: 0, datetime: 1, contacts: 2, success: 3 };
   const isContactsValid = clientName.trim().length >= 2 && isPhoneComplete(clientPhone);
 
+  // ===== ЭКРАН: МАСТЕР НЕ НАЙДЕН =====
   if (notFound) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -289,10 +304,58 @@ export default function BookingPage() {
     );
   }
 
+  // ===== ЭКРАН: ЗАГРУЗКА =====
   if (!master) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // ===== ЭКРАН: ЛИМИТ ЗАПИСЕЙ ИСЧЕРПАН =====
+  if (isBookingLimitReached) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <header className="bg-gradient-to-r from-emerald-800 to-emerald-900 text-white shadow-lg">
+          <div className="max-w-3xl mx-auto px-6 py-8">
+            <div className="flex items-center gap-2 mb-4">
+              <Sparkles size={18} className="text-amber-400" />
+              <span className="text-sm font-semibold text-emerald-300 tracking-wider uppercase">BeautySaaS</span>
+            </div>
+            <h1 className="text-3xl font-bold mb-1">{master.name}</h1>
+            <p className="text-emerald-300 font-medium">Онлайн-запись</p>
+          </div>
+        </header>
+        <main className="max-w-3xl mx-auto px-4 py-16 flex items-center justify-center">
+          <div className="text-center max-w-md bg-white p-10 rounded-3xl shadow-xl border border-gray-100 w-full">
+            <div className="w-20 h-20 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-6">
+              <AlertCircle size={40} className="text-amber-500" />
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-3">
+              Лимит онлайн-записи исчерпан
+            </h2>
+            <p className="text-gray-500 mb-8 leading-relaxed">
+              На этот месяц лимит онлайн-записи исчерпан.<br />
+              Свяжитесь с мастером напрямую для записи.
+            </p>
+            {master.phone && (
+              <a
+                href={`tel:${master.phone}`}
+                className="inline-flex items-center justify-center gap-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-8 py-4 rounded-2xl transition-colors w-full text-lg shadow-lg shadow-emerald-900/20"
+              >
+                <Phone size={20} />
+                {master.phone}
+              </a>
+            )}
+            <button
+              onClick={() => navigate('/')}
+              className="mt-4 w-full py-3 text-sm text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              Вернуться на главную
+            </button>
+          </div>
+        </main>
       </div>
     );
   }

@@ -18,6 +18,27 @@ const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || '';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// ===== УТИЛИТЫ =====
+
+/**
+ * Проверяет, истёк ли 14-дневный триал.
+ * @param {string|null} trialStartDate - ISO строка даты начала триала
+ * @returns {boolean}
+ */
+function isTrialExpired(trialStartDate) {
+  if (!trialStartDate) return false; // нет даты = новый пользователь, триал активен
+  const start = new Date(trialStartDate);
+  const now = new Date();
+  const diffDays = Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+  return diffDays >= 14;
+}
+
+/**
+ * Отправляет сообщение в Telegram через Bot API.
+ * @param {string|number} chatId
+ * @param {string} text - HTML-разметка
+ * @returns {Promise<boolean>}
+ */
 async function sendTelegramMessage(chatId, text) {
   if (!TELEGRAM_BOT_TOKEN) {
     console.error('❌ TELEGRAM_BOT_TOKEN не задан');
@@ -46,12 +67,45 @@ async function sendTelegramMessage(chatId, text) {
   }
 }
 
-// ===== API ENDPOINT: Отправка уведомлений (защищено на сервере) =====
+/**
+ * Отправляет мастеру уведомление об окончании триала с кнопкой перехода к оплате.
+ * @param {string|number} chatId
+ * @param {string} masterName
+ * @returns {Promise<boolean>}
+ */
+async function sendTrialExpiredNotification(chatId, masterName) {
+  const text =
+    `⚠️ <b>${masterName}</b>, ваш 14-дневный пробный период BeautySaaS завершён.\n\n` +
+    `Чтобы продолжать получать мгновенные уведомления в Telegram и видеть аналитику доходов — активируйте тариф <b>ПРО</b>.\n\n` +
+    `👉 <a href="https://beautysaas.ru/#/pricing">Перейти к оплате</a>`;
+
+  return sendTelegramMessage(chatId, text);
+}
+
+// ===== API ENDPOINT: Отправка уведомлений о новой записи =====
 app.post('/api/send-notification', async (req, res) => {
   const { telegram_id, booking } = req.body;
 
   if (!telegram_id || !booking) {
     return res.status(400).json({ error: 'Missing telegram_id or booking data' });
+  }
+
+  // Проверяем статус мастера: is_premium и trial_start_date
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('is_premium, trial_start_date, name')
+    .eq('telegram_id', telegram_id)
+    .single();
+
+  if (!profileError && profile) {
+    const isPremium = profile.is_premium || false;
+    const trialExpired = isTrialExpired(profile.trial_start_date);
+
+    if (!isPremium && trialExpired) {
+      console.log(`🔒 Уведомление заблокировано для ${profile.name}: триал истёк, нет подписки PRO`);
+      // Возвращаем 200 чтобы фронт не видел ошибку — это штатная ситуация
+      return res.json({ success: false, reason: 'trial_expired' });
+    }
   }
 
   const text =
@@ -70,6 +124,57 @@ app.post('/api/send-notification', async (req, res) => {
   } else {
     res.status(500).json({ error: 'Failed to send Telegram notification' });
   }
+});
+
+// ===== API ENDPOINT: Проверка окончания триала и рассылка уведомлений =====
+// Вызывать ежедневно (например, через Railway Cron или внешний планировщик)
+app.post('/api/check-trial-expiry', async (req, res) => {
+  const now = new Date();
+
+  // Ищем мастеров у которых триал закончился ровно сегодня (14 дней назад)
+  const expiryDate = new Date(now);
+  expiryDate.setDate(expiryDate.getDate() - 14);
+
+  const dateFrom = `${expiryDate.toISOString().split('T')[0]}T00:00:00.000Z`;
+  const dateTo = `${expiryDate.toISOString().split('T')[0]}T23:59:59.999Z`;
+
+  console.log(`🔍 Проверяем триалы за период: ${dateFrom} — ${dateTo}`);
+
+  const { data: expiredMasters, error } = await supabase
+    .from('profiles')
+    .select('id, name, telegram_id, trial_start_date, is_premium')
+    .eq('is_premium', false)
+    .gte('trial_start_date', dateFrom)
+    .lte('trial_start_date', dateTo);
+
+  if (error) {
+    console.error('❌ Ошибка запроса истёкших триалов:', error);
+    return res.status(500).json({ error: 'Database error' });
+  }
+
+  if (!expiredMasters || expiredMasters.length === 0) {
+    console.log('✅ Нет мастеров с истёкшим триалом сегодня');
+    return res.json({ sent: 0 });
+  }
+
+  console.log(`📨 Найдено мастеров с истёкшим триалом: ${expiredMasters.length}`);
+
+  let sent = 0;
+  for (const master of expiredMasters) {
+    if (master.telegram_id) {
+      const ok = await sendTrialExpiredNotification(master.telegram_id, master.name);
+      if (ok) {
+        sent++;
+        console.log(`✅ Уведомление об окончании триала отправлено: ${master.name}`);
+      } else {
+        console.warn(`⚠️ Не удалось отправить уведомление: ${master.name}`);
+      }
+    } else {
+      console.warn(`⚠️ У мастера ${master.name} не привязан Telegram — уведомление пропущено`);
+    }
+  }
+
+  res.json({ sent, total: expiredMasters.length });
 });
 
 // ===== TELEGRAM BOT WEBHOOK =====

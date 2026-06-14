@@ -188,3 +188,26 @@ export async function deleteBooking(id: string): Promise<void> {
     .eq('id', id);
   if (error) console.error('Ошибка удаления записи:', error);
 }
+
+/**
+ * Считает количество записей мастера за текущий месяц (не отменённых).
+ * Используется для проверки лимита 30 записей на бесплатном тарифе.
+ */
+export async function getMonthBookingsCount(masterId: string): Promise<number> {
+  const now = new Date();
+  const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+  const { data, error } = await supabase
+    .from('appointments')
+    .select('id')
+    .eq('master_id', masterId)
+    .neq('status', 'cancelled')
+    .like('date', `${monthPrefix}%`);
+
+  if (error) {
+    console.error('Ошибка подсчёта записей за месяц:', error);
+    return 0;
+  }
+
+  return data?.length ?? 0;
+}

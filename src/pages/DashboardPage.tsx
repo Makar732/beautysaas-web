@@ -23,12 +23,13 @@ type Tab = 'calendar' | 'services' | 'analytics' | 'settings';
 
 const SLOT_MINUTES = 30;
 const SLOT_HEIGHT_PX = 48;
+const FREE_SERVICES_LIMIT = 3;
 
 const ALL_TIME_SLOTS: string[] = (() => {
   const slots: string[] = [];
   for (let h = 0; h < 24; h++) {
     for (let m = 0; m < 60; m += SLOT_MINUTES) {
-      slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+      slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '00')}`);
     }
   }
   return slots;
@@ -79,7 +80,6 @@ function timeToMinutes(time: string): number {
   return h * 60 + m;
 }
 
-// Название месяца по индексу
 function getMonthName(monthIndex: number): string {
   return MONTH_NAMES_RU[monthIndex];
 }
@@ -118,6 +118,9 @@ export default function DashboardPage() {
   // Флаг: заблокирована ли аналитика
   const isAnalyticsLocked = !isPremium && !isTrialActive;
 
+  // Флаг: достигнут ли лимит услуг на бесплатном тарифе
+  const isServicesLimitReached = !isPremium && services.length >= FREE_SERVICES_LIMIT;
+
   useEffect(() => {
     if (!user) { navigate('/login'); return; }
     setWeekDates(getWeekDates(currentDate));
@@ -149,8 +152,7 @@ export default function DashboardPage() {
   const masterSlug = user?.slug || '';
   const bookingLink = `${window.location.origin}/#/book/${masterSlug}`;
 
-  // Telegram bot link с уникальным параметром мастера
-  const TELEGRAM_BOT_USERNAME = 'Beauty_SaaSbot'; // 👈 замени на username своего бота
+  const TELEGRAM_BOT_USERNAME = 'Beauty_SaaSbot';
   const telegramBotLink = `https://t.me/${TELEGRAM_BOT_USERNAME}?start=${masterId}`;
 
   const copyLink = async () => {
@@ -248,6 +250,8 @@ export default function DashboardPage() {
 
   const handleSaveService = async () => {
     if (!serviceForm.name || !serviceForm.price || !serviceForm.duration) return;
+    // Дополнительная защита: проверяем лимит перед сохранением новой услуги
+    if (!editingService && isServicesLimitReached) return;
     try {
       const service: Service = {
         id: editingService?.id || generateId(),
@@ -313,7 +317,6 @@ export default function DashboardPage() {
   const monthRevenue = calculateMonthRevenue(revenueMonth);
 
   // ---- ANALYTICS DATA ----
-  // Последние 6 месяцев для графика
   const last6Months = Array.from({ length: 6 }, (_, i) => {
     const d = new Date();
     d.setMonth(d.getMonth() - (5 - i));
@@ -339,7 +342,6 @@ export default function DashboardPage() {
       }, 0) / confirmedMonthBookings.length)
     : 0;
 
-  // Топ услуг по количеству записей
   const serviceStats = services.map(s => ({
     name: s.name,
     count: bookings.filter(b => b.service_id === s.id && b.status === 'confirmed').length,
@@ -378,7 +380,6 @@ export default function DashboardPage() {
             </div>
             <p className="font-semibold text-sm truncate">{user.name}</p>
             <p className="text-xs text-gray-400 truncate">{user.phone}</p>
-            {/* Бейдж тарифа */}
             {isPremium ? (
               <span className="mt-2 inline-flex items-center gap-1 text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full">
                 <Star size={10} /> PRO
@@ -507,14 +508,27 @@ export default function DashboardPage() {
               </Button>
             )}
             {activeTab === 'services' && (
-              <Button variant="primary" size="sm" onClick={() => {
-                setEditingService(null);
-                setServiceForm({ name: '', price: '', duration: '' });
-                setShowEditServiceModal(true);
-              }}>
-                <Plus size={16} />
-                Добавить услугу
-              </Button>
+              <div className="flex flex-col items-end gap-1">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={isServicesLimitReached}
+                  onClick={() => {
+                    if (isServicesLimitReached) return;
+                    setEditingService(null);
+                    setServiceForm({ name: '', price: '', duration: '' });
+                    setShowEditServiceModal(true);
+                  }}
+                >
+                  <Plus size={16} />
+                  Добавить услугу
+                </Button>
+                {isServicesLimitReached && (
+                  <p className="text-xs text-amber-600">
+                    Лимит {FREE_SERVICES_LIMIT} услуги на бесплатном тарифе
+                  </p>
+                )}
+              </div>
             )}
           </div>
 
@@ -563,7 +577,6 @@ export default function DashboardPage() {
           {/* ===== CALENDAR TAB ===== */}
           {activeTab === 'calendar' && (
             <div>
-              {/* Навигация по неделям */}
               <div className="flex items-center justify-between mb-4">
                 <button
                   onClick={() => { const d = new Date(currentDate); d.setDate(d.getDate() - 7); setCurrentDate(d); }}
@@ -614,7 +627,6 @@ export default function DashboardPage() {
 
               {/* ===== DESKTOP CALENDAR ===== */}
               <div className="hidden lg:block bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-                {/* Шапка дней */}
                 <div className="grid border-b border-gray-100" style={{ gridTemplateColumns: '72px repeat(7, 1fr)' }}>
                   <div className="p-3 text-xs text-gray-400 text-center font-medium">Время</div>
                   {weekDates.map((d, i) => {
@@ -630,7 +642,6 @@ export default function DashboardPage() {
                   })}
                 </div>
 
-                {/* Тело сетки */}
                 <div className="overflow-y-auto max-h-[600px]">
                   {visibleSlots.map((slotTime) => {
                     const isHalfHour = slotTime.endsWith(':30');
@@ -640,12 +651,10 @@ export default function DashboardPage() {
                         className={`grid border-b ${isHalfHour ? 'border-gray-50' : 'border-gray-100'}`}
                         style={{ gridTemplateColumns: '72px repeat(7, 1fr)', height: `${SLOT_HEIGHT_PX}px` }}
                       >
-                        {/* Метка времени */}
                         <div className="text-xs text-gray-400 font-mono text-right pr-3 flex items-center justify-end shrink-0">
                           {isHalfHour ? <span className="text-gray-200">·</span> : slotTime}
                         </div>
 
-                        {/* Ячейки дней */}
                         {weekDates.map((d, di) => {
                           const isToday = formatDate(d) === today;
                           const isCovered = isSlotCoveredByEarlierBooking(d, slotTime);
@@ -658,14 +667,12 @@ export default function DashboardPage() {
                               className={`border-l border-gray-100 relative ${isToday ? 'bg-emerald-50/20' : ''} ${!isCovered ? 'cursor-pointer group' : ''}`}
                               style={{ height: `${SLOT_HEIGHT_PX}px`, overflow: 'visible' }}
                             >
-                              {/* Подсказка "+" на пустом слоте */}
                               {!isCovered && startingBookings.length === 0 && (
                                 <div className="absolute inset-0.5 rounded-lg border-2 border-dashed border-transparent group-hover:border-emerald-200 transition-colors flex items-center justify-center z-0">
                                   <Plus size={12} className="text-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity" />
                                 </div>
                               )}
 
-                              {/* Карточки записей — абсолютно позиционированы, растягиваются поверх строк */}
                               {startingBookings.map((b) => {
                                 const cardHeight = getBookingCardHeight(b);
                                 const service = services.find(s => s.id === b.service_id);
@@ -791,6 +798,27 @@ export default function DashboardPage() {
           {/* ===== SERVICES TAB ===== */}
           {activeTab === 'services' && (
             <div>
+              {/* Баннер лимита услуг */}
+              {isServicesLimitReached && (
+                <div className="mb-6 bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-4">
+                  <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center shrink-0">
+                    <Lock size={18} className="text-amber-600" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-amber-900">
+                      Достигнут лимит бесплатного тарифа
+                    </p>
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      На бесплатном тарифе можно создать до {FREE_SERVICES_LIMIT} услуг. Перейдите на PRO для неограниченного количества.
+                    </p>
+                  </div>
+                  <Button variant="primary" size="sm" className="shrink-0">
+                    <Star size={14} />
+                    PRO
+                  </Button>
+                </div>
+              )}
+
               {services.length === 0 ? (
                 <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center">
                   <Package size={48} className="text-gray-300 mx-auto mb-4" />
@@ -827,10 +855,8 @@ export default function DashboardPage() {
           {/* ===== ANALYTICS TAB ===== */}
           {activeTab === 'analytics' && (
             <div className="relative">
-              {/* Контент аналитики */}
               <div className={isAnalyticsLocked ? 'blur-sm pointer-events-none select-none' : ''}>
 
-                {/* Карточки KPI */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
                   <div className="bg-white rounded-2xl border border-gray-200 p-5">
                     <div className="flex items-center gap-3 mb-3">
@@ -860,7 +886,6 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* График выручки */}
                 <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
                   <h3 className="font-bold text-gray-900 text-lg mb-6">Выручка за 6 месяцев</h3>
                   <div className="flex items-end gap-3 h-40">
@@ -885,7 +910,6 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* Топ услуг */}
                 <div className="bg-white rounded-2xl border border-gray-200 p-6">
                   <h3 className="font-bold text-gray-900 text-lg mb-4">Топ услуг</h3>
                   {serviceStats.length === 0 ? (
@@ -943,7 +967,6 @@ export default function DashboardPage() {
           {activeTab === 'settings' && (
             <div className="max-w-2xl space-y-6">
 
-              {/* Ссылка для записи */}
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 <h2 className="font-bold text-gray-900 text-lg mb-1">Ваша ссылка для записи</h2>
                 <p className="text-sm text-gray-500 mb-4">Поделитесь ссылкой с клиентами — они смогут записаться онлайн</p>
@@ -959,7 +982,6 @@ export default function DashboardPage() {
                 </a>
               </div>
 
-              {/* Профиль */}
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 <h2 className="font-bold text-gray-900 text-lg mb-4">Профиль</h2>
                 <div className="space-y-4">
@@ -984,7 +1006,6 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Время работы */}
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 <h2 className="font-bold text-gray-900 text-lg mb-4">Время работы</h2>
                 <div className="grid grid-cols-2 gap-4">
@@ -1003,7 +1024,6 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Выходные дни */}
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 <h2 className="font-bold text-gray-900 text-lg mb-4">Выходные дни</h2>
                 <div className="flex flex-wrap gap-2">
@@ -1017,7 +1037,6 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Telegram уведомления */}
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 <div className="flex items-center gap-2 mb-1">
                   <Send size={18} className="text-emerald-600" />
@@ -1027,7 +1046,6 @@ export default function DashboardPage() {
                   Получайте мгновенные уведомления о новых записях прямо в Telegram.
                 </p>
 
-                {/* Кнопка подключения через бота */}
                 <a
                   href={telegramBotLink}
                   target="_blank"
@@ -1050,7 +1068,6 @@ export default function DashboardPage() {
                   </p>
                 </div>
 
-                {/* Ручной ввод Chat ID (fallback) */}
                 <details className="group">
                   <summary className="text-sm text-gray-400 cursor-pointer hover:text-gray-600 transition-colors list-none flex items-center gap-2">
                     <Bell size={14} />
@@ -1080,7 +1097,6 @@ export default function DashboardPage() {
 
       {/* ===== MODALS ===== */}
 
-      {/* Add Booking */}
       <Modal isOpen={showAddBookingModal} onClose={() => setShowAddBookingModal(false)} title="Добавить запись">
         <div className="space-y-4">
           <Input label="Имя клиента" placeholder="Анна Иванова" value={bookingForm.clientName} onChange={e => setBookingForm(f => ({ ...f, clientName: e.target.value }))} />
@@ -1107,7 +1123,6 @@ export default function DashboardPage() {
         </div>
       </Modal>
 
-      {/* Booking Detail */}
       <Modal isOpen={showBookingDetailModal} onClose={() => setShowBookingDetailModal(false)} title="Детали записи">
         {selectedBooking && (
           <div className="space-y-4">
@@ -1147,7 +1162,6 @@ export default function DashboardPage() {
         )}
       </Modal>
 
-      {/* Service Modal */}
       <Modal isOpen={showEditServiceModal} onClose={() => setShowEditServiceModal(false)} title={editingService ? 'Редактировать услугу' : 'Добавить услугу'}>
         <div className="space-y-4">
           <Input label="Название услуги" placeholder="Маникюр + покрытие" value={serviceForm.name} onChange={e => setServiceForm(f => ({ ...f, name: e.target.value }))} />
