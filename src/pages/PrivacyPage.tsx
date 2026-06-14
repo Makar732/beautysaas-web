@@ -2,6 +2,9 @@ import { useNavigate } from 'react-router-dom';
 import { Sparkles, ArrowLeft, Shield } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 
+// Единый бот техподдержки
+const SUPPORT_TG_URL = 'https://t.me/beautysaas_support_bot';
+
 export default function PrivacyPage() {
   const navigate = useNavigate();
 
@@ -33,6 +36,7 @@ export default function PrivacyPage() {
         </div>
 
         <div className="prose prose-invert max-w-none space-y-8">
+
           <section className="bg-gray-900 rounded-2xl border border-white/5 p-6">
             <h2 className="text-xl font-bold mb-3 text-emerald-400">1. Общие положения</h2>
             <p className="text-gray-300 leading-relaxed text-sm">
@@ -52,8 +56,9 @@ export default function PrivacyPage() {
             <ul className="space-y-2 text-sm text-gray-300">
               {[
                 'Имя и фамилия пользователя (мастера или клиента)',
+                'Адрес электронной почты (при регистрации через email)',
                 'Номер телефона для связи',
-                'Telegram Chat ID для отправки уведомлений (по желанию)',
+                'Telegram Chat ID для отправки уведомлений (по желанию пользователя)',
                 'История записей и оказанных услуг',
                 'Технические данные: IP-адрес, тип браузера, данные сессии',
               ].map((item) => (
@@ -66,7 +71,30 @@ export default function PrivacyPage() {
           </section>
 
           <section className="bg-gray-900 rounded-2xl border border-white/5 p-6">
-            <h2 className="text-xl font-bold mb-3 text-emerald-400">3. Цели обработки персональных данных</h2>
+            <h2 className="text-xl font-bold mb-3 text-emerald-400">3. Способы авторизации</h2>
+            <p className="text-gray-300 leading-relaxed text-sm mb-3">
+              Платформа предоставляет следующие способы авторизации:
+            </p>
+            <ul className="space-y-2 text-sm text-gray-300">
+              {[
+                'Яндекс ID — авторизация через российский сервис Яндекс (yandex.ru)',
+                'VK ID — авторизация через российскую социальную сеть ВКонтакте (vk.com)',
+                'Email и пароль — классическая регистрация с подтверждением почты',
+              ].map((item) => (
+                <li key={item} className="flex items-start gap-2">
+                  <span className="text-emerald-400 mt-0.5">•</span>
+                  {item}
+                </li>
+              ))}
+            </ul>
+            <p className="text-gray-400 text-sm mt-3">
+              Платформа не использует авторизацию через иностранные сервисы (Google, Apple, Facebook и др.)
+              в соответствии с требованиями законодательства Российской Федерации.
+            </p>
+          </section>
+
+          <section className="bg-gray-900 rounded-2xl border border-white/5 p-6">
+            <h2 className="text-xl font-bold mb-3 text-emerald-400">4. Цели обработки персональных данных</h2>
             <p className="text-gray-300 leading-relaxed text-sm mb-3">
               Персональные данные обрабатываются в следующих целях:
             </p>
@@ -87,17 +115,17 @@ export default function PrivacyPage() {
           </section>
 
           <section className="bg-gray-900 rounded-2xl border border-white/5 p-6">
-            <h2 className="text-xl font-bold mb-3 text-emerald-400">4. Хранение данных</h2>
+            <h2 className="text-xl font-bold mb-3 text-emerald-400">5. Хранение данных</h2>
             <p className="text-gray-300 leading-relaxed text-sm">
-              В демонстрационном режиме все данные хранятся исключительно в localStorage вашего браузера
-              и не передаются на серверы третьих лиц. Данные автоматически удаляются при очистке кэша браузера.
-              При подключении режима Supabase данные хранятся на защищённых серверах согласно политике
-              конфиденциальности Supabase (supabase.com/privacy).
+              Данные пользователей хранятся на защищённых серверах с использованием шифрования.
+              База данных платформы размещена на сервисе Supabase согласно политике конфиденциальности
+              (supabase.com/privacy). Технические данные сессий хранятся в localStorage браузера
+              пользователя и удаляются при выходе из аккаунта или очистке кэша.
             </p>
           </section>
 
           <section className="bg-gray-900 rounded-2xl border border-white/5 p-6">
-            <h2 className="text-xl font-bold mb-3 text-emerald-400">5. Передача персональных данных третьим лицам</h2>
+            <h2 className="text-xl font-bold mb-3 text-emerald-400">6. Передача персональных данных третьим лицам</h2>
             <p className="text-gray-300 leading-relaxed text-sm">
               Оператор не передаёт персональные данные пользователей третьим лицам за исключением случаев,
               прямо предусмотренных законодательством Российской Федерации. Уведомления через Telegram Bot API
@@ -106,9 +134,9 @@ export default function PrivacyPage() {
           </section>
 
           <section className="bg-gray-900 rounded-2xl border border-white/5 p-6">
-            <h2 className="text-xl font-bold mb-3 text-emerald-400">6. Права пользователя</h2>
+            <h2 className="text-xl font-bold mb-3 text-emerald-400">7. Права пользователя</h2>
             <p className="text-gray-300 leading-relaxed text-sm mb-3">
-              Пользователь имеет право:
+              В соответствии с Федеральным законом № 152-ФЗ «О персональных данных» пользователь имеет право:
             </p>
             <ul className="space-y-2 text-sm text-gray-300">
               {[
@@ -116,7 +144,7 @@ export default function PrivacyPage() {
                 'Требовать исправления неточных персональных данных',
                 'Требовать удаления своих персональных данных',
                 'Отозвать согласие на обработку персональных данных',
-                'Обжаловать действия Оператора в уполномоченном органе',
+                'Обжаловать действия Оператора в Роскомнадзоре',
               ].map((item) => (
                 <li key={item} className="flex items-start gap-2">
                   <span className="text-emerald-400 mt-0.5">•</span>
@@ -127,28 +155,39 @@ export default function PrivacyPage() {
           </section>
 
           <section className="bg-gray-900 rounded-2xl border border-white/5 p-6">
-            <h2 className="text-xl font-bold mb-3 text-emerald-400">7. Соответствие законодательству</h2>
+            <h2 className="text-xl font-bold mb-3 text-emerald-400">8. Соответствие законодательству</h2>
             <p className="text-gray-300 leading-relaxed text-sm">
               Обработка персональных данных осуществляется в соответствии с Федеральным законом
-              от 27.07.2006 № 152-ФЗ «О персональных данных» и иными нормативными правовыми актами
-              Российской Федерации в области защиты персональных данных.
+              от 27.07.2006 № 152-ФЗ «О персональных данных», Федеральным законом от 27.07.2006 № 149-ФЗ
+              «Об информации, информационных технологиях и о защите информации»
+              и иными нормативными правовыми актами Российской Федерации.
             </p>
           </section>
 
           <section className="bg-gray-900 rounded-2xl border border-white/5 p-6">
-            <h2 className="text-xl font-bold mb-3 text-emerald-400">8. Контакты</h2>
-            <p className="text-gray-300 leading-relaxed text-sm">
-              По всем вопросам, связанным с обработкой персональных данных, обращайтесь:
+            <h2 className="text-xl font-bold mb-3 text-emerald-400">9. Контакты</h2>
+            <p className="text-gray-300 leading-relaxed text-sm mb-4">
+              По всем вопросам, связанным с обработкой персональных данных, а также для реализации
+              своих прав обращайтесь в службу поддержки:
             </p>
-            <div className="mt-3 space-y-1 text-sm">
+            <div className="space-y-2 text-sm">
               <p className="text-gray-300">
-                Telegram: <a href="https://t.me/beautysaas_support" className="text-emerald-400 hover:text-emerald-300 transition-colors">@beautysaas_support</a>
+                Telegram (бот поддержки):{' '}
+                <a
+                  href={SUPPORT_TG_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-emerald-400 hover:text-emerald-300 transition-colors font-medium"
+                >
+                  @beautysaas_support_bot
+                </a>
               </p>
-              <p className="text-gray-300">
+              <p className="text-gray-500 text-xs mt-4">
                 © 2026 BeautySaaS. Все права защищены.
               </p>
             </div>
           </section>
+
         </div>
       </div>
     </div>

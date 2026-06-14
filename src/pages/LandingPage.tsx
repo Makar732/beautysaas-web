@@ -7,7 +7,18 @@ import {
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 
-const DEMO_SLUG = 'https://beautysaas-web-production.up.railway.app/#/book/studiya-beautysaas';
+// ─────────────────────────────────────────────────────────────
+// DEMO: вставьте slug вашего демо-мастера из Supabase.
+// Пока пустая строка — кнопки будут вести на /book/ (без ошибки 404,
+// т.к. BookingPage покажет экран "Мастер не найден").
+// Замените на реальный slug, например 'studiya-beautysaas'
+// ─────────────────────────────────────────────────────────────
+const DEMO_MASTER_SLUG = '';
+
+// ─────────────────────────────────────────────────────────────
+// ПОДДЕРЖКА: единый Telegram-бот техподдержки
+// ─────────────────────────────────────────────────────────────
+const SUPPORT_TG_URL = 'https://t.me/beautysaas_support_bot';
 
 // Реалистичные данные для графика выручки
 const revenueData = [42, 38, 55, 61, 48, 72, 68, 85, 79, 91, 88, 95];
@@ -86,9 +97,13 @@ export default function LandingPage() {
 
   const maxRevenue = Math.max(...revenueData);
 
+  // Маршрут для демо-виджета
+  const demoRoute = DEMO_MASTER_SLUG ? `/book/${DEMO_MASTER_SLUG}` : '/book/demo';
+
   return (
     <div className="min-h-screen bg-gray-950 text-white">
-      {/* NAV */}
+
+      {/* ===== NAV ===== */}
       <nav className="fixed top-0 left-0 right-0 z-40 bg-gray-950/80 backdrop-blur-xl border-b border-white/5">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -98,13 +113,32 @@ export default function LandingPage() {
             </span>
           </div>
           <div className="hidden md:flex items-center gap-8 text-sm text-gray-400">
-            <button onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })} className="hover:text-white transition-colors cursor-pointer">Возможности</button>
-            <button onClick={() => document.getElementById('reviews')?.scrollIntoView({ behavior: 'smooth' })} className="hover:text-white transition-colors cursor-pointer">Отзывы</button>
-            <button onClick={() => document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' })} className="hover:text-white transition-colors cursor-pointer">Тарифы</button>
+            <button
+              onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })}
+              className="hover:text-white transition-colors cursor-pointer"
+            >
+              Возможности
+            </button>
+            <button
+              onClick={() => document.getElementById('reviews')?.scrollIntoView({ behavior: 'smooth' })}
+              className="hover:text-white transition-colors cursor-pointer"
+            >
+              Отзывы
+            </button>
+            <button
+              onClick={() => document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' })}
+              className="hover:text-white transition-colors cursor-pointer"
+            >
+              Тарифы
+            </button>
           </div>
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" onClick={() => navigate('/login')}
-              className="!text-gray-300 !hover:text-white !hover:bg-white/10">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate('/login')}
+              className="!text-gray-300 !hover:text-white !hover:bg-white/10"
+            >
               Войти
             </Button>
             <Button variant="amber" size="sm" onClick={() => navigate('/login')}>
@@ -114,7 +148,7 @@ export default function LandingPage() {
         </div>
       </nav>
 
-      {/* HERO */}
+      {/* ===== HERO ===== */}
       <section className="relative min-h-screen flex items-center justify-center overflow-hidden pt-16">
         {/* Background */}
         <div className="absolute inset-0">
@@ -126,8 +160,6 @@ export default function LandingPage() {
           <div className="absolute inset-0 bg-gradient-to-b from-gray-950/70 via-gray-950/50 to-gray-950" />
           <div className="absolute inset-0 bg-gradient-to-r from-emerald-950/30 to-transparent" />
         </div>
-
-        {/* Decorative orbs */}
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-emerald-600/10 rounded-full blur-3xl" />
         <div className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl" />
 
@@ -151,7 +183,8 @@ export default function LandingPage() {
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-12">
-            <Button variant="amber" size="lg" onClick={() => navigate(`/book/${DEMO_SLUG}`)}>
+            {/* Кнопка демо: ведёт на реальный виджет демо-мастера */}
+            <Button variant="amber" size="lg" onClick={() => navigate(demoRoute)}>
               Протестировать виджет записи
               <ArrowRight size={20} />
             </Button>
@@ -197,7 +230,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* STATS & REVENUE CARD */}
+      {/* ===== STATS & REVENUE CARD ===== */}
       <section id="crm-preview" className="py-20 px-4">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-12">
@@ -248,7 +281,10 @@ export default function LandingPage() {
                 </div>
                 <div className="flex justify-between mt-1">
                   {months.map((m, i) => (
-                    <span key={i} className={`text-xs ${i === currentMonth ? 'text-emerald-400 font-bold' : 'text-gray-600'}`}>
+                    <span
+                      key={i}
+                      className={`text-xs ${i === currentMonth ? 'text-emerald-400 font-bold' : 'text-gray-600'}`}
+                    >
                       {m}
                     </span>
                   ))}
@@ -269,9 +305,7 @@ export default function LandingPage() {
                           <div className={`w-2 h-2 rounded-full ${m.color}`} />
                           <span className="text-sm font-medium">{m.name}</span>
                         </div>
-                        <div className="text-right">
-                          <span className="text-xs text-gray-400">{m.load}%</span>
-                        </div>
+                        <span className="text-xs text-gray-400">{m.load}%</span>
                       </div>
                       <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
                         <div
@@ -283,7 +317,6 @@ export default function LandingPage() {
                     </div>
                   ))}
                 </div>
-
                 <div className="mt-6 pt-4 border-t border-white/5">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-400">Всего за месяц</span>
@@ -300,7 +333,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* CALENDAR / ЖУРНАЛ ЗАПИСЕЙ */}
+      {/* ===== CALENDAR / ЖУРНАЛ ===== */}
       <section id="widget-preview" className="py-10 px-4">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-12">
@@ -312,7 +345,6 @@ export default function LandingPage() {
 
           <div className={`transition-all duration-300 ${activeTab === 'widget' ? 'ring-2 ring-emerald-500 rounded-3xl' : ''}`}>
             <div className="bg-gray-900 rounded-3xl border border-white/5 overflow-hidden">
-              {/* Calendar Header */}
               <div className="p-4 border-b border-white/5 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="bg-emerald-900/40 p-2 rounded-xl">
@@ -337,10 +369,8 @@ export default function LandingPage() {
                 </div>
               </div>
 
-              {/* Timeline */}
               <div className="overflow-x-auto">
                 <div className="min-w-[640px]">
-                  {/* Master columns header */}
                   <div className="grid grid-cols-4 gap-px bg-white/5 border-b border-white/5">
                     <div className="bg-gray-900 p-3 text-xs text-gray-500 font-medium">Время</div>
                     {masters.map((m) => (
@@ -353,7 +383,6 @@ export default function LandingPage() {
                     ))}
                   </div>
 
-                  {/* Time slots */}
                   {todayBookings.map((booking, i) => (
                     <div key={i} className="grid grid-cols-4 gap-px bg-white/5 border-b border-white/3">
                       <div className="bg-gray-900 p-3 flex items-center">
@@ -414,7 +443,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* FEATURES */}
+      {/* ===== FEATURES ===== */}
       <section id="features" className="py-20 px-4">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-12">
@@ -439,7 +468,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* REVIEWS */}
+      {/* ===== REVIEWS ===== */}
       <section id="reviews" className="py-20 px-4 bg-gray-900/50">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-12">
@@ -475,7 +504,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* PRICING */}
+      {/* ===== PRICING ===== */}
       <section id="pricing" className="py-20 px-4">
         <div className="max-w-2xl mx-auto text-center">
           <h2 className="text-3xl sm:text-4xl font-bold mb-4">
@@ -491,24 +520,26 @@ export default function LandingPage() {
 
             <div className="relative">
               <h3 className="text-2xl font-bold mb-2">Старт</h3>
-              <p className="text-gray-400 mb-6">Для соло-мастеров и микро-студий до 3 мастеров</p>
+              <p className="text-gray-400 mb-6">Для соло-мастеров и микро-студий</p>
 
-              <div className="flex items-baseline gap-2 justify-center mb-8">
-                <span className="text-5xl font-black">1 490</span>
+              {/* ── ИСПРАВЛЕНО: цена 990 ₽ вместо 1 490 ₽ ── */}
+              <div className="flex items-baseline gap-2 justify-center mb-2">
+                <span className="text-5xl font-black">990</span>
                 <div className="text-left">
                   <span className="text-emerald-400 font-bold text-xl">₽</span>
                   <p className="text-gray-400 text-sm">/мес</p>
                 </div>
               </div>
+              <p className="text-gray-500 text-sm mb-8">14 дней бесплатно — без привязки карты</p>
 
               <div className="space-y-3 mb-8 text-left">
                 {[
                   'Онлайн-запись 24/7 через персональную ссылку',
-                  'До 3 мастеров в команде',
+                  'До 3 активных услуг в прайсе',
                   'Telegram-уведомления мастеру и клиентам',
                   'Аналитика выручки и загрузки',
                   'Управление услугами и расписанием',
-                  'Поддержка в Telegram / WhatsApp',
+                  'Поддержка через Telegram-бот',
                   'Все будущие обновления включены',
                 ].map((item) => (
                   <div key={item} className="flex items-start gap-3">
@@ -518,7 +549,13 @@ export default function LandingPage() {
                 ))}
               </div>
 
-              <Button variant="amber" size="lg" className="w-full" onClick={() => navigate('/login')}>
+              {/* Кнопка ведёт на страницу авторизации */}
+              <Button
+                variant="amber"
+                size="lg"
+                className="w-full"
+                onClick={() => navigate('/login')}
+              >
                 Начать бесплатно — 14 дней
                 <ArrowRight size={18} />
               </Button>
@@ -528,7 +565,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* CTA SECTION */}
+      {/* ===== CTA ===== */}
       <section className="py-20 px-4">
         <div className="max-w-4xl mx-auto bg-gradient-to-br from-emerald-900/50 to-gray-900 rounded-3xl border border-emerald-700/30 p-10 text-center relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-r from-emerald-800/10 to-transparent" />
@@ -540,23 +577,24 @@ export default function LandingPage() {
               Протестируйте виджет записи прямо сейчас — без регистрации
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button variant="amber" size="lg" onClick={() => navigate(`/book/${DEMO_SLUG}`)}>
+              {/* Кнопка демо: ведёт на реальный виджет демо-мастера */}
+              <Button variant="amber" size="lg" onClick={() => navigate(demoRoute)}>
                 Протестировать виджет записи
                 <ArrowRight size={20} />
               </Button>
               <Button variant="secondary" size="lg" onClick={() => navigate('/login')}>
-                Войти в демо-кабинет
+                Войти / Зарегистрироваться
               </Button>
             </div>
           </div>
         </div>
       </section>
 
-      {/* FOOTER */}
+      {/* ===== FOOTER ===== */}
       <footer className="bg-gray-950 border-t border-white/5 py-10 px-4">
         <div className="max-w-7xl mx-auto">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Sparkles className="text-amber-400" size={18} />
               <span className="font-bold">
                 Beauty<span className="text-emerald-400">SaaS</span>
@@ -564,15 +602,16 @@ export default function LandingPage() {
               <span className="text-gray-600 text-sm ml-2">© 2026 BeautySaaS. Платформа онлайн-записи</span>
             </div>
 
-            <div className="flex items-center gap-6">
+            <div className="flex items-center gap-6 flex-wrap justify-center">
+              {/* ── ИСПРАВЛЕНО: ссылка на официального бот-поддержки ── */}
               <a
-                href="https://t.me/beautysaas_support"
+                href={SUPPORT_TG_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors text-sm"
               >
                 <MessageCircle size={16} />
-                Написать в Telegram
+                Техподдержка
               </a>
               <a
                 href="tel:+78001234567"

@@ -12,7 +12,10 @@ interface AuthContextType {
   isTrialActive: boolean;
   trialDaysLeft: number;
   loginAsGuest: () => void;
-  loginWithGoogle: () => Promise<void>;
+  loginWithYandex: () => Promise<void>;
+  loginWithVK: () => Promise<void>;
+  loginWithEmail: (email: string, password: string) => Promise<{ error: string | null }>;
+  registerWithEmail: (email: string, password: string) => Promise<{ error: string | null }>;
   completeOnboarding: (name: string, phone: string) => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (updates: Partial<AppUser>) => Promise<void>;
@@ -46,16 +49,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(savedUser);
     }
 
-    // Шаг 2: Слушаем Google OAuth редирект
+    // Шаг 2: Слушаем OAuth редиректы (Яндекс, VK) и email-сессии
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('🔐 Auth event:', event, session?.user?.email);
 
         if (event === 'SIGNED_IN' && session?.user) {
-          const googleUser = session.user;
-          const googleId = googleUser.id;
+          const authUser = session.user;
+          const userId = authUser.id;
 
-          const existingMaster = await getMasterById(googleId);
+          const existingMaster = await getMasterById(userId);
 
           if (existingMaster) {
             console.log('✅ Найден существующий профиль:', existingMaster.name);
@@ -78,12 +81,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setNeedsOnboarding(false);
           } else {
             console.log('🆕 Новый пользователь, нужен онбординг');
-            sessionStorage.setItem('google_user_id', googleId);
-            sessionStorage.setItem('google_user_email', googleUser.email || '');
-            sessionStorage.setItem(
-              'google_user_name',
-              googleUser.user_metadata?.full_name || googleUser.user_metadata?.name || ''
-            );
+            sessionStorage.setItem('oauth_user_id', userId);
+            sessionStorage.setItem('oauth_user_email', authUser.email || '');
+            // Пробуем вытащить имя из метаданных OAuth (Яндекс/VK передают разные поля)
+            const rawName =
+              authUser.user_metadata?.full_name ||
+              authUser.user_metadata?.name ||
+              authUser.user_metadata?.first_name ||
+              '';
+            sessionStorage.setItem('oauth_user_name', rawName);
             setNeedsOnboarding(true);
           }
         }
@@ -101,24 +107,77 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginAsGuest = () => {};
 
-  const loginWithGoogle = async () => {
+  /**
+   * Авторизация через Яндекс OAuth.
+   */
+  const loginWithYandex = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
+      provider: 'yandex',
       options: {
         redirectTo: `${window.location.origin}/`,
       },
     });
-    if (error) console.error('❌ Ошибка Google OAuth:', error.message);
+    if (error) console.error('❌ Ошибка Яндекс OAuth:', error.message);
+  };
+
+  /**
+   * Авторизация через VK OAuth.
+   */
+  const loginWithVK = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'vk',
+      options: {
+        redirectTo: `${window.location.origin}/`,
+      },
+    });
+    if (error) console.error('❌ Ошибка VK OAuth:', error.message);
+  };
+
+  /**
+   * Вход по email + пароль.
+   * Возвращает { error } если что-то пошло не так.
+   */
+  const loginWithEmail = async (
+    email: string,
+    password: string
+  ): Promise<{ error: string | null }> => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      console.error('❌ Ошибка входа по email:', error.message);
+      return { error: error.message };
+    }
+    return { error: null };
+  };
+
+  /**
+   * Регистрация по email + пароль.
+   * После signUp Supabase автоматически тригернет SIGNED_IN → onAuthStateChange → онбординг.
+   * Возвращает { error } если что-то пошло не так.
+   */
+  const registerWithEmail = async (
+    email: string,
+    password: string
+  ): Promise<{ error: string | null }> => {
+    const { error } = await supabase.auth.signUp({ email, password });
+    if (error) {
+      console.error('❌ Ошибка регистрации по email:', error.message);
+      return { error: error.message };
+    }
+    return { error: null };
   };
 
   const completeOnboarding = async (name: string, phone: string) => {
-    const googleId = sessionStorage.getItem('google_user_id');
-    const id = googleId || `master-${Date.now()}`;
+    // Поддерживаем оба ключа: старый google_user_id и новый oauth_user_id
+    const userId =
+      sessionStorage.getItem('oauth_user_id') ||
+      sessionStorage.getItem('google_user_id') ||
+      `master-${Date.now()}`;
+
     const slug = generateSlug(name);
     const trialStartDate = new Date().toISOString();
 
     const newUser: AppUser = {
-      id,
+      id: userId,
       name,
       phone,
       slug,
@@ -152,6 +211,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(newUser);
     setNeedsOnboarding(false);
 
+    // Чистим оба варианта ключей
+    sessionStorage.removeItem('oauth_user_id');
+    sessionStorage.removeItem('oauth_user_email');
+    sessionStorage.removeItem('oauth_user_name');
     sessionStorage.removeItem('google_user_id');
     sessionStorage.removeItem('google_user_email');
     sessionStorage.removeItem('google_user_name');
@@ -187,7 +250,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(updated);
   };
 
-  // Вычисляем статус триала и премиума
   const { isActive: isTrialActive, daysLeft: trialDaysLeft } = checkTrial(user?.trial_start_date);
   const isPremium = user?.is_premium || false;
 
@@ -200,7 +262,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isTrialActive,
       trialDaysLeft,
       loginAsGuest,
-      loginWithGoogle,
+      loginWithYandex,
+      loginWithVK,
+      loginWithEmail,
+      registerWithEmail,
       completeOnboarding,
       logout,
       updateUser,
