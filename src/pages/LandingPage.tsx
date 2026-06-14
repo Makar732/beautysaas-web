@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 
-const DEMO_SLUG = 'irina-kozlova';
+const DEMO_SLUG = 'https://beautysaas-web-production.up.railway.app/#/book/studiya-beautysaas';
 
 // Реалистичные данные для графика выручки
 const revenueData = [42, 38, 55, 61, 48, 72, 68, 85, 79, 91, 88, 95];
