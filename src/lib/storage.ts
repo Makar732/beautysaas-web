@@ -211,3 +211,65 @@ export async function getMonthBookingsCount(masterId: string): Promise<number> {
 
   return data?.length ?? 0;
 }
+
+// ---- DEV TOOLS (только для разработки, удалить перед релизом) ----
+
+/**
+ * Переключает is_premium для мастера на противоположное значение.
+ * @param masterId - ID мастера
+ * @param currentValue - текущее значение is_premium
+ */
+export async function devTogglePremium(
+  masterId: string,
+  currentValue: boolean
+): Promise<void> {
+  const newValue = !currentValue;
+  const { error } = await supabase
+    .from('profiles')
+    .update({ is_premium: newValue })
+    .eq('id', masterId);
+
+  if (error) {
+    console.error('❌ [DEV] Ошибка переключения premium:', error);
+    throw error;
+  }
+  console.log(`✅ [DEV] is_premium → ${newValue}`);
+}
+
+/**
+ * Устанавливает trial_start_date на 15 дней назад,
+ * имитируя истечение триала.
+ * @param masterId - ID мастера
+ */
+export async function devExpireTrial(masterId: string): Promise<void> {
+  const expiredDate = new Date();
+  expiredDate.setDate(expiredDate.getDate() - 15);
+
+  const { error } = await supabase
+    .from('profiles')
+    .update({ trial_start_date: expiredDate.toISOString() })
+    .eq('id', masterId);
+
+  if (error) {
+    console.error('❌ [DEV] Ошибка имитации истечения триала:', error);
+    throw error;
+  }
+  console.log(`✅ [DEV] trial_start_date → ${expiredDate.toISOString()} (15 дней назад)`);
+}
+
+/**
+ * Сбрасывает trial_start_date на текущий момент (сброс триала).
+ * @param masterId - ID мастера
+ */
+export async function devResetTrial(masterId: string): Promise<void> {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ trial_start_date: new Date().toISOString() })
+    .eq('id', masterId);
+
+  if (error) {
+    console.error('❌ [DEV] Ошибка сброса триала:', error);
+    throw error;
+  }
+  console.log('✅ [DEV] trial_start_date сброшен на сейчас');
+}

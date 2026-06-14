@@ -4,13 +4,13 @@ import {
   Calendar, Package, Settings, LogOut, Sparkles, Plus, Trash2, Edit3,
   Copy, Check, ExternalLink, Bell, Clock, User, Phone, DollarSign,
   ChevronLeft, ChevronRight, Save, TrendingUp, BarChart2, Lock,
-  Send, Star
+  Send, Star, FlaskConical, Zap, RotateCcw
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
   getBookingsByMasterId, getServicesByMasterId,
   upsertService, deleteService, addBooking, updateBookingStatus, deleteBooking,
-  getMasterById
+  getMasterById, devTogglePremium, devExpireTrial, devResetTrial,
 } from '../lib/storage';
 import { Booking, Service } from '../types';
 import { Button } from '../components/ui/Button';
@@ -103,6 +103,7 @@ export default function DashboardPage() {
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [mobileView, setMobileView] = useState<'week' | 'day'>('week');
   const [isLoading, setIsLoading] = useState(true);
+  const [devLoading, setDevLoading] = useState(false);
 
   const [workStart, setWorkStart] = useState('09:00');
   const [workEnd, setWorkEnd] = useState('21:00');
@@ -159,6 +160,50 @@ export default function DashboardPage() {
     await navigator.clipboard.writeText(bookingLink);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  // ---- DEV PANEL HANDLERS ----
+  const handleDevTogglePremium = async () => {
+    if (!user) return;
+    setDevLoading(true);
+    try {
+      await devTogglePremium(user.id, isPremium);
+      // Обновляем localStorage чтобы страница перезагрузилась с актуальным состоянием
+      await updateUser({ ...user, is_premium: !isPremium });
+      window.location.reload();
+    } catch {
+      alert('❌ Ошибка переключения Premium. Проверь консоль.');
+      setDevLoading(false);
+    }
+  };
+
+  const handleDevExpireTrial = async () => {
+    if (!user) return;
+    setDevLoading(true);
+    try {
+      await devExpireTrial(user.id);
+      // Обновляем дату триала в localStorage
+      const expiredDate = new Date();
+      expiredDate.setDate(expiredDate.getDate() - 15);
+      await updateUser({ ...user, trial_start_date: expiredDate.toISOString() });
+      window.location.reload();
+    } catch {
+      alert('❌ Ошибка имитации истечения триала. Проверь консоль.');
+      setDevLoading(false);
+    }
+  };
+
+  const handleDevResetTrial = async () => {
+    if (!user) return;
+    setDevLoading(true);
+    try {
+      await devResetTrial(user.id);
+      await updateUser({ ...user, trial_start_date: new Date().toISOString() });
+      window.location.reload();
+    } catch {
+      alert('❌ Ошибка сброса триала. Проверь консоль.');
+      setDevLoading(false);
+    }
   };
 
   // ---- SLOTS ----
@@ -250,7 +295,6 @@ export default function DashboardPage() {
 
   const handleSaveService = async () => {
     if (!serviceForm.name || !serviceForm.price || !serviceForm.duration) return;
-    // Дополнительная защита: проверяем лимит перед сохранением новой услуги
     if (!editingService && isServicesLimitReached) return;
     try {
       const service: Service = {
@@ -427,6 +471,68 @@ export default function DashboardPage() {
             <p className="font-bold text-emerald-400">{todayRevenue.toLocaleString('ru-RU')} ₽</p>
             <p className="text-xs text-gray-500">{todayBookings.length} записей</p>
           </div>
+
+          {/* ===== DEV PANEL (удалить перед релизом) ===== */}
+          <div className="border border-red-500/30 bg-red-950/20 rounded-xl p-3 space-y-2">
+            <div className="flex items-center gap-2 mb-2">
+              <FlaskConical size={13} className="text-red-400 shrink-0" />
+              <p className="text-xs font-bold text-red-400 uppercase tracking-wide">Dev Panel</p>
+            </div>
+
+            {/* Текущий статус */}
+            <div className="bg-black/20 rounded-lg px-2 py-1.5 space-y-0.5">
+              <p className="text-xs text-gray-500">
+                Premium:{' '}
+                <span className={isPremium ? 'text-amber-400 font-bold' : 'text-gray-400'}>
+                  {isPremium ? 'ВКЛ ✓' : 'ВЫКЛ'}
+                </span>
+              </p>
+              <p className="text-xs text-gray-500">
+                Триал:{' '}
+                <span className={isTrialActive ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
+                  {isTrialActive ? `активен (${trialDaysLeft} дн.)` : 'ИСТЁК'}
+                </span>
+              </p>
+              <p className="text-xs text-gray-500">
+                Аналитика:{' '}
+                <span className={isAnalyticsLocked ? 'text-red-400 font-bold' : 'text-emerald-400'}>
+                  {isAnalyticsLocked ? 'БЛОК' : 'открыта'}
+                </span>
+              </p>
+            </div>
+
+            {/* Кнопка 1: Переключить Premium */}
+            <button
+              onClick={handleDevTogglePremium}
+              disabled={devLoading}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20"
+            >
+              <Zap size={12} className="shrink-0" />
+              {devLoading ? 'Загрузка...' : `Premium: ${isPremium ? 'ВЫКЛ →' : '→ ВКЛ'}`}
+            </button>
+
+            {/* Кнопка 2: Имитировать истечение триала */}
+            <button
+              onClick={handleDevExpireTrial}
+              disabled={devLoading}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20"
+            >
+              <Clock size={12} className="shrink-0" />
+              {devLoading ? 'Загрузка...' : 'Триал → истёк (−15д)'}
+            </button>
+
+            {/* Кнопка 3: Сбросить триал */}
+            <button
+              onClick={handleDevResetTrial}
+              disabled={devLoading}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20"
+            >
+              <RotateCcw size={12} className="shrink-0" />
+              {devLoading ? 'Загрузка...' : 'Сбросить триал (сейчас)'}
+            </button>
+          </div>
+          {/* ===== /DEV PANEL ===== */}
+
           <button
             onClick={handleLogout}
             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-gray-400 hover:bg-red-900/20 hover:text-red-400 transition-all cursor-pointer"
@@ -601,7 +707,6 @@ export default function DashboardPage() {
                 </button>
               </div>
 
-              {/* Mobile toggle */}
               <div className="flex lg:hidden gap-2 mb-4">
                 <button onClick={() => setMobileView('week')} className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer ${mobileView === 'week' ? 'bg-emerald-700 text-white' : 'bg-gray-100 text-gray-600'}`}>Неделя</button>
                 <button onClick={() => setMobileView('day')} className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer ${mobileView === 'day' ? 'bg-emerald-700 text-white' : 'bg-gray-100 text-gray-600'}`}>День</button>
@@ -625,7 +730,7 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {/* ===== DESKTOP CALENDAR ===== */}
+              {/* DESKTOP CALENDAR */}
               <div className="hidden lg:block bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
                 <div className="grid border-b border-gray-100" style={{ gridTemplateColumns: '72px repeat(7, 1fr)' }}>
                   <div className="p-3 text-xs text-gray-400 text-center font-medium">Время</div>
@@ -687,11 +792,7 @@ export default function DashboardPage() {
                                       setShowBookingDetailModal(true);
                                     }}
                                     className={`absolute left-0.5 right-0.5 top-0.5 rounded-lg border-l-4 px-1.5 py-1 text-xs cursor-pointer hover:shadow-lg transition-shadow ${STATUS_COLORS[b.status]}`}
-                                    style={{
-                                      height: `${cardHeight}px`,
-                                      zIndex: 2,
-                                      overflow: 'hidden',
-                                    }}
+                                    style={{ height: `${cardHeight}px`, zIndex: 2, overflow: 'hidden' }}
                                   >
                                     <p className="font-semibold truncate leading-tight">{b.client_name}</p>
                                     <p className="opacity-70 truncate leading-tight text-xs">{b.service_name}</p>
@@ -711,7 +812,7 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* ===== MOBILE VIEWS ===== */}
+              {/* MOBILE VIEWS */}
               <div className="lg:hidden">
                 {mobileView === 'day' ? (
                   <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
@@ -798,7 +899,6 @@ export default function DashboardPage() {
           {/* ===== SERVICES TAB ===== */}
           {activeTab === 'services' && (
             <div>
-              {/* Баннер лимита услуг */}
               {isServicesLimitReached && (
                 <div className="mb-6 bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-4">
                   <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center shrink-0">
@@ -941,7 +1041,6 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Блокировка-заглушка поверх контента */}
               {isAnalyticsLocked && (
                 <div className="absolute inset-0 flex items-center justify-center z-10">
                   <div className="bg-white rounded-3xl border border-gray-200 shadow-2xl p-8 max-w-sm mx-4 text-center">
