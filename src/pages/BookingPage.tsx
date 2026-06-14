@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Sparkles, ChevronLeft, ChevronRight, Check, Phone, User,
-  Clock, ArrowRight, Calendar, AlertCircle, Scissors, Home
+  Clock, ArrowRight, Calendar, AlertCircle, Scissors, Home, Bell
 } from 'lucide-react';
 import {
   getMasterBySlug, getServicesByMasterId, getBookingsByMasterId, addBooking
@@ -15,6 +15,9 @@ import { PhoneInput, isPhoneComplete } from '../components/ui/PhoneInput';
 
 const SLOT_INTERVAL = 30;
 const FREE_BOOKINGS_LIMIT = 30;
+
+// Имя бота — используется для формирования deep link для клиента
+const TELEGRAM_BOT_USERNAME = 'Beauty_SaaSbot';
 
 function generateId() {
   return `booking-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -248,14 +251,16 @@ export default function BookingPage() {
       date: dateToStr(selectedDate),
       time: selectedTime,
       status: 'pending',
+      client_tg_chat_id: '',
       created_at: new Date().toISOString(),
     };
 
     await addBooking(booking);
     setCreatedBooking(booking);
 
+    // Отправляем уведомление мастеру
     const telegramTarget = master.telegram_id || master.telegram_chat_id;
-    console.log('📲 Отправляем уведомление на:', telegramTarget);
+    console.log('📲 Отправляем уведомление мастеру на:', telegramTarget);
 
     if (telegramTarget) {
       await sendTelegramNotification(
@@ -270,7 +275,7 @@ export default function BookingPage() {
         }
       );
     } else {
-      console.warn('⚠️ Telegram не подключён — уведомление не отправлено');
+      console.warn('⚠️ Telegram мастера не подключён — уведомление не отправлено');
     }
 
     setLoading(false);
@@ -282,6 +287,12 @@ export default function BookingPage() {
 
   const stepIndex = { service: 0, datetime: 1, contacts: 2, success: 3 };
   const isContactsValid = clientName.trim().length >= 2 && isPhoneComplete(clientPhone);
+
+  // Deep link для клиента в Telegram-бота
+  // Префикс appt_ позволяет боту отличить клиентский сценарий от мастерского
+  const clientTelegramLink = createdBooking
+    ? `https://t.me/${TELEGRAM_BOT_USERNAME}?start=appt_${createdBooking.id}`
+    : '';
 
   // ===== ЭКРАН: МАСТЕР НЕ НАЙДЕН =====
   if (notFound) {
@@ -398,6 +409,8 @@ export default function BookingPage() {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-8 pb-24">
+
+        {/* ===== ШАГ 1: ВЫБОР УСЛУГИ ===== */}
         {step === 'service' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Выберите услугу</h2>
@@ -450,6 +463,7 @@ export default function BookingPage() {
           </div>
         )}
 
+        {/* ===== ШАГ 2: ДАТА И ВРЕМЯ ===== */}
         {step === 'datetime' && selectedService && (
           <div className="animate-in fade-in slide-in-from-right-4 duration-500">
             <button
@@ -481,6 +495,7 @@ export default function BookingPage() {
             </div>
 
             <div className="grid gap-6 lg:grid-cols-2 items-start">
+              {/* Календарь */}
               <div className="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
                 <h3 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-2">
                   <Calendar className="text-emerald-500" size={20} />
@@ -549,6 +564,7 @@ export default function BookingPage() {
                 </div>
               </div>
 
+              {/* Время */}
               <div className="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
                 <h3 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-2">
                   <Clock className="text-emerald-500" size={20} />
@@ -618,6 +634,7 @@ export default function BookingPage() {
           </div>
         )}
 
+        {/* ===== ШАГ 3: КОНТАКТЫ ===== */}
         {step === 'contacts' && (
           <div className="max-w-xl mx-auto animate-in fade-in slide-in-from-right-4 duration-500">
             <button
@@ -703,6 +720,7 @@ export default function BookingPage() {
           </div>
         )}
 
+        {/* ===== ШАГ 4: УСПЕХ ===== */}
         {step === 'success' && createdBooking && (
           <div className="max-w-md mx-auto text-center animate-in zoom-in-95 duration-500">
             <div className="w-24 h-24 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
@@ -714,7 +732,8 @@ export default function BookingPage() {
               Мастер свяжется с вами для подтверждения.
             </p>
 
-            <div className="bg-white rounded-3xl border border-gray-200 p-8 text-left shadow-lg mb-8">
+            {/* Карточка визита */}
+            <div className="bg-white rounded-3xl border border-gray-200 p-8 text-left shadow-lg mb-6">
               <div className="flex items-center gap-4 border-b border-gray-100 pb-6 mb-6">
                 <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
                   <User size={24} className="text-gray-500"/>
@@ -750,6 +769,41 @@ export default function BookingPage() {
                 )}
               </div>
             </div>
+
+            {/* ===== БЛОК НАПОМИНАНИЯ В TELEGRAM (добровольно) ===== */}
+            <div className="bg-blue-50 border border-blue-100 rounded-3xl p-6 mb-6 text-left">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 bg-blue-500 rounded-2xl flex items-center justify-center shrink-0 shadow-lg shadow-blue-500/30">
+                  <Bell size={22} className="text-white" />
+                </div>
+                <div>
+                  <p className="font-bold text-gray-900 text-base mb-1">
+                    Не забыть о визите?
+                  </p>
+                  <p className="text-sm text-gray-500 leading-relaxed">
+                    Мы пришлём напоминание в Telegram за день до визита — чтобы вы точно не пропустили.
+                  </p>
+                </div>
+              </div>
+
+              <a
+                href={clientTelegramLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-5 flex items-center justify-center gap-3 bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white font-bold px-6 py-4 rounded-2xl transition-all w-full shadow-md shadow-blue-500/25 text-base"
+              >
+                {/* Telegram icon */}
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                  <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.248l-2.05 9.66c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.913.561z"/>
+                </svg>
+                🔔 Включить напоминание в Telegram
+              </a>
+
+              <p className="text-xs text-gray-400 text-center mt-3">
+                По желанию — вы можете просто закрыть эту страницу
+              </p>
+            </div>
+            {/* ===== /БЛОК НАПОМИНАНИЯ ===== */}
 
             <div className="flex flex-col gap-3">
               <Button

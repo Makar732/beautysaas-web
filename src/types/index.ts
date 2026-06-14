@@ -50,8 +50,9 @@ export interface Booking {
   service_name: string;
   client_name: string;
   client_phone: string;
-  date: string; // Строго 'YYYY-MM-DD'
-  time: string; // Строго 'HH:MM'
+  date: string;                    // Строго 'YYYY-MM-DD'
+  time: string;                    // Строго 'HH:MM'
   status: 'pending' | 'confirmed' | 'cancelled';
+  client_tg_chat_id?: string;      // Telegram chat_id клиента (заполняется через бота, опционально)
   created_at: string;
 }
