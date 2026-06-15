@@ -1,4 +1,4 @@
-import { HashRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import LandingPage from './pages/LandingPage';
@@ -6,14 +6,25 @@ import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import BookingPage from './pages/BookingPage';
 import PrivacyPage from './pages/PrivacyPage';
+import AuthCallbackPage from './pages/AuthCallbackPage';
 
 export default function App() {
   return (
     <AuthProvider>
       <HashRouter>
         <Routes>
+          {/* Публичные маршруты */}
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+
+          {/* Страница-обработчик OAuth редиректа от Яндекса */}
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
+
+          {/* Виджет записи (публичный — для клиентов) */}
+          <Route path="/book/:master_slug" element={<BookingPage />} />
+
+          {/* Защищённые маршруты (только авторизованные с заполненным профилем) */}
           <Route
             path="/dashboard"
             element={
@@ -22,10 +33,9 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="/book/:master_slug" element={<BookingPage />} />
-          <Route path="/privacy" element={<PrivacyPage />} />
-          {/* Fallback */}
-          <Route path="*" element={<LandingPage />} />
+
+          {/* Fallback → главная */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </HashRouter>
     </AuthProvider>
