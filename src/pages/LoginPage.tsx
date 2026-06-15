@@ -12,7 +12,6 @@ export default function LoginPage() {
   const {
     user,
     loginWithYandex,
-    loginWithVK,
     loginWithEmail,
     registerWithEmail,
     completeOnboarding,
@@ -27,7 +26,6 @@ export default function LoginPage() {
 
   // OAuth загрузка
   const [yandexLoading, setYandexLoading] = useState(false);
-  const [vkLoading, setVkLoading] = useState(false);
 
   // Email-форма
   const [showEmailForm, setShowEmailForm] = useState(false);
@@ -84,13 +82,7 @@ export default function LoginPage() {
   const handleYandex = async () => {
     setYandexLoading(true);
     await loginWithYandex();
-    setYandexLoading(false);
-  };
-
-  const handleVK = async () => {
-    setVkLoading(true);
-    await loginWithVK();
-    setVkLoading(false);
+    // Не снимаем loading — браузер уйдёт на редирект
   };
 
   // ---- EMAIL ----
@@ -112,7 +104,6 @@ export default function LoginPage() {
     if (emailMode === 'login') {
       const { error } = await loginWithEmail(email.trim(), password);
       if (error) {
-        // Переводим типичные ошибки Supabase на русский
         if (error.includes('Invalid login credentials')) {
           setEmailError('Неверный email или пароль');
         } else if (error.includes('Email not confirmed')) {
@@ -170,7 +161,7 @@ export default function LoginPage() {
           {/* ---- ЯНДЕКС ---- */}
           <button
             onClick={handleYandex}
-            disabled={yandexLoading || vkLoading}
+            disabled={yandexLoading}
             className="w-full flex items-center justify-center gap-3 bg-[#FC3F1D] hover:bg-[#e8391a] active:bg-[#d43518] text-white font-semibold py-3.5 px-6 rounded-2xl transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed shadow-lg shadow-red-900/20"
           >
             {yandexLoading ? (
@@ -183,23 +174,6 @@ export default function LoginPage() {
               </svg>
             )}
             {yandexLoading ? 'Переходим к Яндексу...' : 'Войти через Яндекс'}
-          </button>
-
-          {/* ---- VK ---- */}
-          <button
-            onClick={handleVK}
-            disabled={yandexLoading || vkLoading}
-            className="w-full flex items-center justify-center gap-3 bg-[#0077FF] hover:bg-[#006be0] active:bg-[#005ec7] text-white font-semibold py-3.5 px-6 rounded-2xl transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed shadow-lg shadow-blue-900/20"
-          >
-            {vkLoading ? (
-              <Loader2 size={20} className="animate-spin" />
-            ) : (
-              /* VK логотип */
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
-                <path d="M15.684 0H8.316C1.592 0 0 1.592 0 8.316v7.368C0 22.408 1.592 24 8.316 24h7.368C22.408 24 24 22.408 24 15.684V8.316C24 1.592 22.408 0 15.684 0zm3.692 17.123h-1.744c-.66 0-.862-.523-2.049-1.712-1.033-1-1.49-1.135-1.744-1.135-.356 0-.458.102-.458.593v1.560c0 .424-.135.678-1.253.678-1.846 0-3.896-1.118-5.335-3.202C4.624 10.857 4 8.983 4 8.577c0-.254.102-.491.593-.491h1.744c.44 0 .61.203.78.677.847 2.456 2.270 4.608 2.855 4.608.22 0 .322-.102.322-.660V9.736c-.068-1.186-.695-1.287-.695-1.710 0-.203.169-.407.44-.407h2.745c.373 0 .508.203.508.643v3.473c0 .373.169.508.271.508.22 0 .407-.135.813-.542 1.254-1.406 2.152-3.575 2.152-3.575.118-.254.322-.491.762-.491h1.744c.525 0 .644.271.525.643-.22 1.017-2.355 4.031-2.355 4.031-.186.305-.254.44 0 .779.186.254.796.779 1.203 1.253.745.847 1.321 1.558 1.473 2.050.17.49-.085.745-.576.745z"/>
-              </svg>
-            )}
-            {vkLoading ? 'Переходим к VK...' : 'Войти через VK'}
           </button>
 
           {/* Разделитель */}

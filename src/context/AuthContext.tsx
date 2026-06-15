@@ -14,7 +14,6 @@ interface AuthContextType {
   trialDaysLeft: number;
   loginAsGuest: () => void;
   loginWithYandex: () => Promise<void>;
-  loginWithVK: () => Promise<void>;
   loginWithEmail: (email: string, password: string) => Promise<{ error: string | null }>;
   registerWithEmail: (email: string, password: string) => Promise<{ error: string | null }>;
   completeOnboarding: (name: string, phone: string) => Promise<void>;
@@ -50,7 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(savedUser);
     }
 
-    // Шаг 2: Слушаем OAuth редиректы (Яндекс, VK) и email-сессии
+    // Шаг 2: Слушаем OAuth редиректы (Яндекс) и email-сессии
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('🔐 Auth event:', event, session?.user?.email);
@@ -108,33 +107,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loginAsGuest = () => {};
 
   /**
-   * Авторизация через Яндекс OAuth.
-   * Каст через unknown нужен для совместимости со старыми типами @supabase/supabase-js,
-   * где 'yandex' ещё не включён в union-тип Provider.
+   * Авторизация через Яндекс (Custom OAuth Provider в Supabase).
    */
   const loginWithYandex = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'yandex' as unknown as Provider,
+      provider: 'custom:yandex' as unknown as Provider,
       options: {
         redirectTo: `${window.location.origin}/`,
       },
     });
     if (error) console.error('❌ Ошибка Яндекс OAuth:', error.message);
-  };
-
-  /**
-   * Авторизация через VK OAuth.
-   * Каст через unknown нужен для совместимости со старыми типами @supabase/supabase-js,
-   * где 'vk' ещё не включён в union-тип Provider.
-   */
-  const loginWithVK = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'vk' as unknown as Provider,
-      options: {
-        redirectTo: `${window.location.origin}/`,
-      },
-    });
-    if (error) console.error('❌ Ошибка VK OAuth:', error.message);
   };
 
   /**
@@ -262,7 +244,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       trialDaysLeft,
       loginAsGuest,
       loginWithYandex,
-      loginWithVK,
       loginWithEmail,
       registerWithEmail,
       completeOnboarding,
