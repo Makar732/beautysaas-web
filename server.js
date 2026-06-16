@@ -2,6 +2,7 @@ import express from 'express';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { createClient } from '@supabase/supabase-js';
+import { handleSupportUpdate, registerSupportBotWebhook } from './supportBot.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -551,7 +552,15 @@ app.post('/webhook/telegram', async (req, res) => {
     console.error('❌ Ошибка в webhook/telegram:', err);
   }
 });
-
+// ════════════════════════════════════════════════════════════════
+// WEBHOOK: Бот поддержки (SUPPORT_BOT_TOKEN)
+// Принимает сообщения мастеров и чеки об оплате
+// ════════════════════════════════════════════════════════════════════════
+app.post('/webhook/support', async (req, res) => {
+  // Отвечаем Telegram сразу — не ждём обработки
+  res.sendStatus(200);
+  await handleSupportUpdate(req.body);
+});
 // ════════════════════════════════════════════════════════════════
 // СТАТИКА
 // ════════════════════════════════════════════════════════════════
@@ -601,5 +610,10 @@ app.listen(PORT, async () => {
     }
   } catch (err) {
     console.error('❌ Ошибка при установке webhook:', err);
+  }
+
+  // ── Webhook бота поддержки (НОВОЕ) ────────────────────────────
+  if (RAILWAY_URL) {
+    await registerSupportBotWebhook(`https://${RAILWAY_URL}`);
   }
 });
