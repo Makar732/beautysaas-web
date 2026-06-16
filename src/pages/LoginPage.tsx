@@ -46,10 +46,7 @@ export default function LoginPage() {
 
   // Подставляем имя из OAuth если есть
   useEffect(() => {
-    const oauthName =
-      sessionStorage.getItem('oauth_user_name') ||
-      sessionStorage.getItem('google_user_name') ||
-      '';
+    const oauthName = sessionStorage.getItem('oauth_user_name') || '';
     if (oauthName && needsOnboarding) {
       setName(oauthName);
     }

@@ -57,7 +57,7 @@ interface AuthContextType {
 /**
  * Безопасное извлечение имени из user_metadata.
  * Яндекс кладёт данные в display_name / real_name / first_name.
- * Google клал в full_name / name.
+ * Email-регистрация не даёт имени вообще.
  * Если ничего нет — возвращаем пустую строку (не падаем).
  */
 function extractDisplayName(metadata: Record<string, unknown>): string {
@@ -154,7 +154,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           sessionStorage.setItem('oauth_user_id', authUserId);
           sessionStorage.setItem('oauth_user_email', authUserEmail);
 
-          // Безопасно извлекаем имя из метаданных Яндекса/email
+          // Безопасно извлекаем имя из метаданных Яндекса
           const rawName = extractDisplayName(metadata);
           sessionStorage.setItem('oauth_user_name', rawName);
 
@@ -244,8 +244,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'yandex',
       options: {
-        // После OAuth Яндекс вернёт сюда — HashRouter подхватит хэш
-        redirectTo: `${window.location.origin}${window.location.pathname}#/login`,
+        // После OAuth Яндекс вернёт сюда — страница AuthCallbackPage обработает
+        redirectTo: `${window.location.origin}${window.location.pathname}#/auth/callback`,
         // Запрашиваем базовые данные профиля у Яндекса
         scopes: 'login:email login:info login:avatar',
       },
