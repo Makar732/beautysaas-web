@@ -1294,10 +1294,15 @@ export default function DashboardPage() {
                       Доступ к аналитике открывается на тарифе{' '}
                       <strong>PRO</strong>. Ваш пробный период истёк.
                     </p>
-                    <Button variant="primary" className="w-full">
+                    <a
+                      href="https://t.me/beautysaas_support_bot"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-5 py-3 rounded-xl transition-all text-sm"
+                    >
                       <Star size={16} />
                       Перейти на PRO
-                    </Button>
+                    </a>
                     <p className="text-xs text-gray-400 mt-3">От 990 ₽/месяц</p>
                   </div>
                 </div>

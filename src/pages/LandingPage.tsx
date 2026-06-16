@@ -184,10 +184,14 @@ export default function LandingPage() {
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-12">
             {/* Кнопка демо: ведёт на реальный виджет демо-мастера */}
-            <Button variant="amber" size="lg" onClick={() => navigate(demoRoute)}>
+            <a
+              href="https://beautysaas-web-production.up.railway.app/#/book/studiya-beauty-saas"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 bg-white text-gray-900 hover:bg-gray-100 font-semibold px-6 py-3 rounded-xl transition-all text-sm shadow-lg"
+            >
               Протестировать виджет записи
-              <ArrowRight size={20} />
-            </Button>
+            </a>
             <Button variant="secondary" size="lg" onClick={() => navigate('/login')}>
               Попробовать бесплатно
             </Button>
@@ -579,10 +583,14 @@ export default function LandingPage() {
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               {/* Кнопка демо: ведёт на реальный виджет демо-мастера */}
-              <Button variant="amber" size="lg" onClick={() => navigate(demoRoute)}>
+              <a
+                href="https://beautysaas-web-production.up.railway.app/#/book/studiya-beauty-saas"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 bg-white text-gray-900 hover:bg-gray-100 font-semibold px-6 py-3 rounded-xl transition-all text-sm shadow-lg"
+              >
                 Протестировать виджет записи
-                <ArrowRight size={20} />
-              </Button>
+              </a>
               <Button variant="secondary" size="lg" onClick={() => navigate('/login')}>
                 Войти / Зарегистрироваться
               </Button>
