@@ -13,8 +13,8 @@ import {
   getUser,
   saveUser,
   clearUser,
-  upsertMaster,
   getMasterById,
+  upsertMaster,
   initStorage,
 } from '../lib/storage';
 import { generateSlug } from '../lib/transliterate';
@@ -25,12 +25,7 @@ import { generateSlug } from '../lib/transliterate';
 interface AuthContextType {
   user: AppUser | null;
   isAuthenticated: boolean;
-  /**
-   * true  → профиль не заполнен, пользователь обязан пройти онбординг
-   * false → профиль готов, можно работать в /dashboard
-   */
   needsOnboarding: boolean;
-  /** Загрузка первоначальной сессии (не показываем UI пока неизвестно) */
   isLoading: boolean;
   isPremium: boolean;
   isTrialActive: boolean;
@@ -47,7 +42,6 @@ interface AuthContextType {
   completeOnboarding: (name: string, phone: string) => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (updates: Partial<AppUser>) => Promise<void>;
-  // оставляем для обратной совместимости (DashboardPage может вызывать)
   loginAsGuest: () => void;
 }
 
@@ -55,12 +49,6 @@ interface AuthContextType {
 // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 // ─────────────────────────────────────────────────────────────
 
-/**
- * Безопасное извлечение имени из user_metadata.
- * Яндекс кладёт данные в display_name / real_name / first_name.
- * Email-регистрация не даёт имени вообще.
- * Если ничего нет — возвращаем пустую строку (не падаем).
- */
 function extractDisplayName(metadata: Record<string, unknown>): string {
   return (
     (metadata?.display_name as string) ||
@@ -72,9 +60,6 @@ function extractDisplayName(metadata: Record<string, unknown>): string {
   );
 }
 
-/**
- * Проверяет, активен ли 14-дневный триал.
- */
 function checkTrial(trialStartDate?: string): {
   isActive: boolean;
   daysLeft: number;
@@ -89,15 +74,13 @@ function checkTrial(trialStartDate?: string): {
   return { isActive: daysLeft > 0, daysLeft };
 }
 
-/**
- * Проверяет, заполнены ли обязательные поля профиля.
- * Профиль считается завершённым если есть name И phone.
- */
 function isProfileComplete(master: {
   name?: string | null;
+  full_name?: string | null;
   phone?: string | null;
 }): boolean {
-  const hasName = typeof master.name === 'string' && master.name.trim().length >= 2;
+  const name = master.name || master.full_name;
+  const hasName = typeof name === 'string' && name.trim().length >= 2;
   const hasPhone =
     typeof master.phone === 'string' && master.phone.replace(/\D/g, '').length >= 10;
   return hasName && hasPhone;
@@ -113,40 +96,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // ── Обработчик успешного входа ────────────────────────────
   const handleSignedIn = useCallback(
     async (authUserId: string, authUserEmail: string, metadata: Record<string, unknown>) => {
       try {
-        console.log('🔐 handleSignedIn:', authUserEmail);
+        console.log('🔐 handleSignedIn для пользователя:', authUserEmail);
 
-        const existingMaster = await getMasterById(authUserId);
+        const profile = await getMasterById(authUserId);
 
-        if (existingMaster && isProfileComplete(existingMaster)) {
-          console.log('✅ Профиль найден и заполнен:', existingMaster.name);
+        if (profile && isProfileComplete(profile)) {
+          console.log('✅ Профиль найден и полностью заполнен');
 
           const appUser: AppUser = {
-            id: existingMaster.id,
-            name: existingMaster.name,
-            phone: existingMaster.phone,
-            slug: existingMaster.slug,
+            id: profile.id,
+            name: profile.name,
+            phone: profile.phone,
+            slug: profile.slug,
             isGuest: false,
-            telegram_chat_id: existingMaster.telegram_chat_id || '',
-            telegram_bot_token: existingMaster.telegram_bot_token || '',
-            telegram_id: existingMaster.telegram_id || '',
-            trial_start_date: existingMaster.trial_start_date,
-            is_premium: existingMaster.is_premium || false,
-            workingHours: existingMaster.workingHours || {
-              start: '09:00',
-              end: '21:00',
-            },
-            daysOff: existingMaster.daysOff || [],
+            telegram_chat_id: profile.telegram_chat_id || '',
+            telegram_bot_token: profile.telegram_bot_token || '',
+            telegram_id: profile.telegram_id || '',
+            trial_start_date: profile.trial_start_date,
+            is_premium: profile.is_premium || false,
+            workingHours: profile.workingHours || { start: '09:00', end: '21:00' },
+            daysOff: profile.daysOff || [],
           };
 
           saveUser(appUser);
           setUser(appUser);
           setNeedsOnboarding(false);
         } else {
-          console.log('🆕 Профиль отсутствует или не заполнен → онбординг');
+          console.log('🆕 Профиля нет или он не заполнен → принудительный онбординг');
 
           sessionStorage.setItem('oauth_user_id', authUserId);
           sessionStorage.setItem('oauth_user_email', authUserEmail);
@@ -173,6 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const savedUser = getUser();
     if (savedUser && isProfileComplete(savedUser)) {
       setUser(savedUser);
+      setNeedsOnboarding(false);
     }
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -191,10 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('🔔 Auth event:', event, session?.user?.email || '—');
 
-      if (
-        (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') &&
-        session?.user
-      ) {
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
         await handleSignedIn(
           session.user.id,
           session.user.email || '',
@@ -225,8 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'yandex' as Provider,
       options: {
-        redirectTo: `${window.location.origin}${window.location.pathname}#/auth/callback`,
-        scopes: 'login:email login:info login:avatar',
+        redirectTo: window.location.origin + '/auth/callback',
       },
     });
 
@@ -267,13 +243,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: null };
   };
 
-  const completeOnboarding = async (
-    name: string,
-    phone: string
-  ): Promise<void> => {
-    const userId =
-      sessionStorage.getItem('oauth_user_id') || `master-${Date.now()}`;
-
+  const completeOnboarding = async (name: string, phone: string): Promise<void> => {
+    const userId = sessionStorage.getItem('oauth_user_id') || `master-${Date.now()}`;
     const slug = generateSlug(name);
     const trialStartDate = new Date().toISOString();
 
@@ -333,7 +304,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await upsertMaster({
       id: updated.id,
       name: updated.name,
-      slug: updated.slug,
+      slug: updated.slug || generateSlug(updated.name),
       phone: updated.phone,
       telegram_chat_id: updated.telegram_chat_id || '',
       telegram_bot_token: updated.telegram_bot_token || '',

@@ -13,18 +13,12 @@ export default function App() {
     <AuthProvider>
       <HashRouter>
         <Routes>
-          {/* Публичные маршруты */}
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
-
-          {/* Страница-обработчик OAuth редиректа от Яндекса */}
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
-
-          {/* Виджет записи (публичный — для клиентов) */}
           <Route path="/book/:master_slug" element={<BookingPage />} />
 
-          {/* Защищённые маршруты (только авторизованные с заполненным профилем) */}
           <Route
             path="/dashboard"
             element={
@@ -34,7 +28,6 @@ export default function App() {
             }
           />
 
-          {/* Fallback → главная */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </HashRouter>
