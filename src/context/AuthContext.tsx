@@ -19,9 +19,6 @@ import {
 } from '../lib/storage';
 import { generateSlug } from '../lib/transliterate';
 
-// ─────────────────────────────────────────────────────────────
-// ТИПЫ
-// ─────────────────────────────────────────────────────────────
 interface AuthContextType {
   user: AppUser | null;
   isAuthenticated: boolean;
@@ -31,23 +28,13 @@ interface AuthContextType {
   isTrialActive: boolean;
   trialDaysLeft: number;
   loginWithYandex: () => Promise<void>;
-  loginWithEmail: (
-    email: string,
-    password: string
-  ) => Promise<{ error: string | null }>;
-  registerWithEmail: (
-    email: string,
-    password: string
-  ) => Promise<{ error: string | null }>;
+  loginWithEmail: (email: string, password: string) => Promise<{ error: string | null }>;
+  registerWithEmail: (email: string, password: string) => Promise<{ error: string | null }>;
   completeOnboarding: (name: string, phone: string) => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (updates: Partial<AppUser>) => Promise<void>;
   loginAsGuest: () => void;
 }
-
-// ─────────────────────────────────────────────────────────────
-// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-// ─────────────────────────────────────────────────────────────
 
 function extractDisplayName(metadata: Record<string, unknown>): string {
   return (
@@ -60,35 +47,21 @@ function extractDisplayName(metadata: Record<string, unknown>): string {
   );
 }
 
-function checkTrial(trialStartDate?: string): {
-  isActive: boolean;
-  daysLeft: number;
-} {
+function checkTrial(trialStartDate?: string): { isActive: boolean; daysLeft: number } {
   if (!trialStartDate) return { isActive: true, daysLeft: 14 };
   const start = new Date(trialStartDate);
   const now = new Date();
-  const diffDays = Math.floor(
-    (now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)
-  );
+  const diffDays = Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
   const daysLeft = Math.max(0, 14 - diffDays);
   return { isActive: daysLeft > 0, daysLeft };
 }
 
-function isProfileComplete(master: {
-  name?: string | null;
-  full_name?: string | null;
-  phone?: string | null;
-}): boolean {
-  const name = master.name || master.full_name;
-  const hasName = typeof name === 'string' && name.trim().length >= 2;
-  const hasPhone =
-    typeof master.phone === 'string' && master.phone.replace(/\D/g, '').length >= 10;
+function isProfileComplete(master: { name?: string | null; phone?: string | null }): boolean {
+  const hasName = typeof master.name === 'string' && master.name.trim().length >= 2;
+  const hasPhone = typeof master.phone === 'string' && master.phone.replace(/\D/g, '').length >= 10;
   return hasName && hasPhone;
 }
 
-// ─────────────────────────────────────────────────────────────
-// КОНТЕКСТ
-// ─────────────────────────────────────────────────────────────
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -99,17 +72,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const handleSignedIn = useCallback(
     async (authUserId: string, authUserEmail: string, metadata: Record<string, unknown>) => {
       try {
-        console.log('🔐 handleSignedIn для пользователя:', authUserEmail);
-
         const profile = await getMasterById(authUserId);
 
         if (profile && isProfileComplete(profile)) {
-          console.log('✅ Профиль найден и полностью заполнен');
-
           const appUser: AppUser = {
             id: profile.id,
-            name: profile.name,
-            phone: profile.phone,
+            name: profile.name!,
+            phone: profile.phone!,
             slug: profile.slug,
             isGuest: false,
             telegram_chat_id: profile.telegram_chat_id || '',
@@ -125,13 +94,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(appUser);
           setNeedsOnboarding(false);
         } else {
-          console.log('🆕 Профиля нет или он не заполнен → принудительный онбординг');
-
           sessionStorage.setItem('oauth_user_id', authUserId);
           sessionStorage.setItem('oauth_user_email', authUserEmail);
-
-          const rawName = extractDisplayName(metadata);
-          sessionStorage.setItem('oauth_user_name', rawName);
+          sessionStorage.setItem('oauth_user_name', extractDisplayName(metadata));
 
           setNeedsOnboarding(true);
           setUser(null);
@@ -145,7 +110,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  // ── Инициализация и подписка на Supabase Auth ─────────────
   useEffect(() => {
     initStorage();
 
@@ -169,8 +133,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('🔔 Auth event:', event, session?.user?.email || '—');
-
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
         await handleSignedIn(
           session.user.id,
@@ -181,69 +143,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (event === 'SIGNED_OUT') {
         clearUser();
-        sessionStorage.removeItem('oauth_user_id');
-        sessionStorage.removeItem('oauth_user_email');
-        sessionStorage.removeItem('oauth_user_name');
+        sessionStorage.clear();
         setUser(null);
         setNeedsOnboarding(false);
       }
-
       setIsLoading(false);
     });
 
     return () => subscription.unsubscribe();
   }, [handleSignedIn]);
 
-  // ─────────────────────────────────────────────────────────
-  // МЕТОДЫ АВТОРИЗАЦИИ
-  // ─────────────────────────────────────────────────────────
-
-  const loginWithYandex = async (): Promise<void> => {
+  const loginWithYandex = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'yandex' as Provider,
-      options: {
-        redirectTo: window.location.origin + '/auth/callback',
-      },
+      options: { redirectTo: window.location.origin + '/auth/callback' },
     });
-
-    if (error) {
-      console.error('❌ Ошибка Яндекс OAuth:', error.message);
-      throw error;
-    }
+    if (error) throw error;
   };
 
-  const loginWithEmail = async (
-    email: string,
-    password: string
-  ): Promise<{ error: string | null }> => {
+  const loginWithEmail = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      console.error('❌ Ошибка входа по email:', error.message);
-      return { error: error.message };
-    }
-    return { error: null };
+    return { error: error ? error.message : null };
   };
 
-  const registerWithEmail = async (
-    email: string,
-    password: string
-  ): Promise<{ error: string | null }> => {
+  const registerWithEmail = async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) {
-      console.error('❌ Ошибка регистрации:', error.message);
-      return { error: error.message };
-    }
+    if (error) return { error: error.message };
 
     if (data.user) {
       sessionStorage.setItem('oauth_user_id', data.user.id);
       sessionStorage.setItem('oauth_user_email', email);
       sessionStorage.setItem('oauth_user_name', '');
     }
-
     return { error: null };
   };
 
-  const completeOnboarding = async (name: string, phone: string): Promise<void> => {
+  const completeOnboarding = async (name: string, phone: string) => {
     const userId = sessionStorage.getItem('oauth_user_id') || `master-${Date.now()}`;
     const slug = generateSlug(name);
     const trialStartDate = new Date().toISOString();
@@ -273,10 +208,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       telegram_id: '',
       trial_start_date: trialStartDate,
       is_premium: false,
-      workingHours: newUser.workingHours!,
-      daysOff: newUser.daysOff!,
+      working_hours: newUser.workingHours,
+      days_off: newUser.daysOff,
       created_at: new Date().toISOString(),
-    });
+    } as any);
 
     saveUser(newUser);
     setUser(newUser);
@@ -285,11 +220,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     sessionStorage.removeItem('oauth_user_id');
     sessionStorage.removeItem('oauth_user_email');
     sessionStorage.removeItem('oauth_user_name');
-
-    console.log('✅ Онбординг завершён, профиль создан:', newUser.name);
   };
 
-  const logout = async (): Promise<void> => {
+  const logout = async () => {
     await supabase.auth.signOut();
     clearUser();
     sessionStorage.clear();
@@ -297,32 +230,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setNeedsOnboarding(false);
   };
 
-  const updateUser = async (updates: Partial<AppUser>): Promise<void> => {
+  const updateUser = async (updates: Partial<AppUser>) => {
     if (!user) return;
     const updated: AppUser = { ...user, ...updates };
-
     await upsertMaster({
-      id: updated.id,
-      name: updated.name,
-      slug: updated.slug || generateSlug(updated.name),
-      phone: updated.phone,
-      telegram_chat_id: updated.telegram_chat_id || '',
-      telegram_bot_token: updated.telegram_bot_token || '',
-      telegram_id: updated.telegram_id || '',
-      trial_start_date: updated.trial_start_date,
-      is_premium: updated.is_premium || false,
-      workingHours: updated.workingHours || { start: '09:00', end: '21:00' },
-      daysOff: updated.daysOff || [],
+      ...updated,
+      working_hours: updated.workingHours,
+      days_off: updated.daysOff,
       created_at: new Date().toISOString(),
-    });
-
+    } as any);
     saveUser(updated);
     setUser(updated);
   };
 
-  const { isActive: isTrialActive, daysLeft: trialDaysLeft } = checkTrial(
-    user?.trial_start_date
-  );
+  const { isActive: isTrialActive, daysLeft: trialDaysLeft } = checkTrial(user?.trial_start_date);
   const isPremium = user?.is_premium || false;
 
   return (
@@ -335,13 +256,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isPremium,
         isTrialActive,
         trialDaysLeft,
-        loginAsGuest: () => {},
         loginWithYandex,
         loginWithEmail,
         registerWithEmail,
         completeOnboarding,
         logout,
         updateUser,
+        loginAsGuest: () => {},
       }}
     >
       {children}
@@ -350,7 +271,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
+  const context = useContext(AuthContext);
+  if (!context) throw new Error('useAuth must be used within AuthProvider');
+  return context;
 }

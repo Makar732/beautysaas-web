@@ -58,28 +58,34 @@ export default function LoginPage() {
     setYandexLoading(true);
     try {
       await loginWithYandex();
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error('Yandex login error:', err.message);
+    } finally {
+      setYandexLoading(false);
     }
-    setYandexLoading(false);
   };
 
   const handleEmailSubmit = async () => {
     setEmailError('');
     setEmailSuccess('');
-    if (!email || !password) return setEmailError('Заполните email и пароль');
+    if (!email.trim() || !password.trim()) return setEmailError('Заполните email и пароль');
     if (password.length < 6) return setEmailError('Пароль должен быть не менее 6 символов');
 
     setEmailLoading(true);
 
     if (emailMode === 'login') {
       const { error } = await loginWithEmail(email.trim(), password);
-      if (error) setEmailError(error.includes('Invalid') ? 'Неверный email или пароль' : 'Ошибка входа');
+      if (error) {
+        setEmailError(error.includes('Invalid') || error.includes('credentials') 
+          ? 'Неверный email или пароль' 
+          : 'Ошибка входа. Попробуйте снова.');
+      }
     } else {
       const { error } = await registerWithEmail(email.trim(), password);
-      if (error) setEmailError('Ошибка регистрации');
-      else {
-        setEmailSuccess(`Письмо с подтверждением отправлено на ${email}`);
+      if (error) {
+        setEmailError('Этот email уже используется или ошибка регистрации');
+      } else {
+        setEmailSuccess(`Письмо с подтверждением отправлено на ${email}. После подтверждения войдите.`);
         setEmailMode('login');
       }
     }
@@ -87,7 +93,11 @@ export default function LoginPage() {
   };
 
   if (isLoading) {
-    return <div className="min-h-screen bg-gray-950 flex items-center justify-center"><Loader2 className="animate-spin text-emerald-400" size={40} /></div>;
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <Loader2 className="animate-spin text-emerald-400" size={48} />
+      </div>
+    );
   }
 
   return (
@@ -111,7 +121,7 @@ export default function LoginPage() {
           <button
             onClick={handleYandex}
             disabled={yandexLoading}
-            className="w-full flex items-center justify-center gap-3 bg-[#FC3F1D] hover:bg-[#e8391a] text-white font-semibold py-3.5 px-6 rounded-2xl transition-all active:scale-95 disabled:opacity-60"
+            className="w-full flex items-center justify-center gap-3 bg-[#FC3F1D] hover:bg-[#e8391a] text-white font-semibold py-3.5 px-6 rounded-2xl transition-all active:scale-[0.97] disabled:opacity-60"
           >
             {yandexLoading ? <Loader2 size={20} className="animate-spin" /> : 'Войти через Яндекс'}
           </button>
@@ -125,7 +135,7 @@ export default function LoginPage() {
           <div>
             <button
               onClick={() => setShowEmailForm(v => !v)}
-              className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border border-white/10 hover:border-white/20 text-gray-400 hover:text-white text-sm font-medium"
+              className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border border-white/10 hover:border-white/20 text-gray-400 hover:text-white text-sm font-medium transition-all"
             >
               <div className="flex items-center gap-2">
                 <Mail size={16} />
@@ -137,36 +147,68 @@ export default function LoginPage() {
             {showEmailForm && (
               <div className="mt-4 space-y-3">
                 <div className="flex bg-gray-800 rounded-xl p-1">
-                  <button onClick={() => { setEmailMode('login'); setEmailError(''); setEmailSuccess(''); }} className={`flex-1 py-2 rounded-lg text-sm ${emailMode === 'login' ? 'bg-emerald-600 text-white' : 'text-gray-400'}`}>Войти</button>
-                  <button onClick={() => { setEmailMode('register'); setEmailError(''); setEmailSuccess(''); }} className={`flex-1 py-2 rounded-lg text-sm ${emailMode === 'register' ? 'bg-emerald-600 text-white' : 'text-gray-400'}`}>Зарегистрироваться</button>
+                  <button
+                    onClick={() => { setEmailMode('login'); setEmailError(''); setEmailSuccess(''); }}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium ${emailMode === 'login' ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                  >
+                    Войти
+                  </button>
+                  <button
+                    onClick={() => { setEmailMode('register'); setEmailError(''); setEmailSuccess(''); }}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium ${emailMode === 'register' ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                  >
+                    Зарегистрироваться
+                  </button>
                 </div>
 
                 <div className="relative">
-                  <input type="email" placeholder="your@email.com" value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-gray-800 border border-white/10 rounded-xl px-4 py-3 pl-10 text-white" />
-                  <Mail size={15} className="absolute left-3.5 top-4 text-gray-500" />
+                  <input
+                    type="email"
+                    placeholder="your@email.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full bg-gray-800 border border-white/10 rounded-xl px-4 py-3 pl-10 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500"
+                  />
+                  <Mail size={16} className="absolute left-3.5 top-4 text-gray-500" />
                 </div>
 
                 <div className="relative">
-                  <input type={showPassword ? 'text' : 'password'} placeholder={emailMode === 'register' ? 'Придумайте пароль' : 'Пароль'} value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleEmailSubmit()} className="w-full bg-gray-800 border border-white/10 rounded-xl px-4 py-3 pl-10 pr-12 text-white" />
-                  <Lock size={15} className="absolute left-3.5 top-4 text-gray-500" />
-                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-4 text-gray-500">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder={emailMode === 'register' ? 'Придумайте пароль (мин. 6 символов)' : 'Ваш пароль'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleEmailSubmit()}
+                    className="w-full bg-gray-800 border border-white/10 rounded-xl px-4 py-3 pl-10 pr-12 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500"
+                  />
+                  <Lock size={16} className="absolute left-3.5 top-4 text-gray-500" />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-4 top-4 text-gray-400 hover:text-white"
+                  >
                     {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                   </button>
                 </div>
 
-                {emailError && <div className="bg-red-900/30 border border-red-700 text-red-400 rounded-xl px-4 py-3 text-sm">{emailError}</div>}
-                {emailSuccess && <div className="bg-emerald-900/30 border border-emerald-700 text-emerald-400 rounded-xl px-4 py-3 text-sm">{emailSuccess}</div>}
+                {emailError && <div className="bg-red-900/30 border border-red-700/50 text-red-400 rounded-2xl px-4 py-3 text-sm">{emailError}</div>}
+                {emailSuccess && <div className="bg-emerald-900/30 border border-emerald-700/50 text-emerald-400 rounded-2xl px-4 py-3 text-sm">{emailSuccess}</div>}
 
-                <button onClick={handleEmailSubmit} disabled={emailLoading} className="w-full bg-emerald-600 hover:bg-emerald-500 py-3 rounded-xl text-white font-semibold flex items-center justify-center gap-2">
-                  {emailLoading ? <Loader2 className="animate-spin" size={20} /> : emailMode === 'login' ? 'Войти' : 'Создать аккаунт'}
+                <button
+                  onClick={handleEmailSubmit}
+                  disabled={emailLoading}
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 py-3 rounded-2xl text-white font-semibold flex items-center justify-center gap-2 disabled:opacity-70"
+                >
+                  {emailLoading ? <Loader2 className="animate-spin" size={20} /> : (emailMode === 'login' ? 'Войти' : 'Создать аккаунт')}
+                  {!emailLoading && <ArrowRight size={18} />}
                 </button>
               </div>
             )}
           </div>
 
-          <p className="text-xs text-gray-600 text-center pt-4">
+          <p className="text-xs text-gray-500 text-center pt-4">
             Входя в систему, вы соглашаетесь с{' '}
-            <a href="#/privacy" className="text-emerald-400">политикой конфиденциальности</a>
+            <a href="#/privacy" className="text-emerald-400 hover:text-emerald-300">политикой конфиденциальности</a>
           </p>
         </div>
 
@@ -175,16 +217,40 @@ export default function LoginPage() {
         </div>
       </div>
 
-      <Modal isOpen={needsOnboarding} onClose={() => {}} title="Завершите регистрацию">
-        <div className="space-y-6">
-          <p className="text-gray-400 text-sm">Заполните данные, чтобы продолжить работу в системе.</p>
+      <Modal isOpen={needsOnboarding} onClose={() => {}} title="Расскажите о себе">
+        <div className="space-y-5">
+          <p className="text-gray-400 text-sm">Это займёт 30 секунд. Эти данные будут использоваться в системе.</p>
 
-          <Input label="ФИО или название студии" placeholder="Ирина Козлова / Студия Красоты" value={name} onChange={e => setName(e.target.value)} error={onboardingErrors.name} />
+          <div className="relative">
+            <Input
+              label="ФИО или название студии"
+              placeholder="Ирина Козлова или Студия Beauty"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              error={onboardingErrors.name}
+            />
+            <User size={18} className="absolute right-4 top-[42px] text-gray-400 pointer-events-none" />
+          </div>
 
-          <PhoneInput label="Номер телефона" value={phone} onChange={setPhone} error={onboardingErrors.phone} />
+          <div className="relative">
+            <PhoneInput
+              label="Номер телефона"
+              value={phone}
+              onChange={setPhone}
+              error={onboardingErrors.phone}
+            />
+            <Phone size={18} className="absolute right-4 top-[42px] text-gray-400 pointer-events-none" />
+          </div>
 
-          <Button onClick={handleOnboardingSubmit} loading={onboardingLoading} disabled={!name.trim() || !isPhoneComplete(phone)} className="w-full">
-            Завершить регистрацию <ArrowRight size={18} />
+          <Button
+            onClick={handleOnboardingSubmit}
+            loading={onboardingLoading}
+            disabled={!name.trim() || !isPhoneComplete(phone)}
+            className="w-full mt-2"
+            size="lg"
+          >
+            Завершить регистрацию и войти
+            <ArrowRight size={18} />
           </Button>
         </div>
       </Modal>
