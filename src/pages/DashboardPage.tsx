@@ -86,7 +86,7 @@ function getMonthName(monthIndex: number): string {
 
 export default function DashboardPage() {
   const { user, logout, updateUser, isPremium, isTrialActive, trialDaysLeft } = useAuth();
-  const ADMIN_UUID = 'СЮДА_ВСТАВЬ_СВОЙ_UUID_ИЗ_SUPABASE';
+  const ADMIN_UUID = '789e7654-c21d-4edc-9ad8-a5a316aad726';
   const isAdmin = user?.id === ADMIN_UUID;
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<Tab>('calendar');
