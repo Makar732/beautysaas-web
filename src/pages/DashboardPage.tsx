@@ -4,7 +4,7 @@ import {
   Calendar, Package, Settings, LogOut, Sparkles, Plus, Trash2, Edit3,
   Copy, Check, ExternalLink, Bell, Clock, User, Phone, DollarSign,
   ChevronLeft, ChevronRight, Save, TrendingUp, BarChart2, Lock,
-  Send, Star, FlaskConical, Zap, RotateCcw
+  Send, Star, FlaskConical, Zap, RotateCcw, Shield
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -86,6 +86,8 @@ function getMonthName(monthIndex: number): string {
 
 export default function DashboardPage() {
   const { user, logout, updateUser, isPremium, isTrialActive, trialDaysLeft } = useAuth();
+  const ADMIN_UUID = 'СЮДА_ВСТАВЬ_СВОЙ_UUID_ИЗ_SUPABASE';
+  const isAdmin = user?.id === ADMIN_UUID;
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<Tab>('calendar');
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -463,6 +465,19 @@ export default function DashboardPage() {
               )}
             </button>
           ))}
+
+          {isAdmin && (
+            <button
+              onClick={() => navigate('/admin')}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-red-400 hover:bg-red-900/20 hover:text-red-300 border border-red-500/20 mt-2"
+            >
+              <Shield size={18} />
+              Админ Панель
+              <span className="ml-auto text-xs bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-full">
+                ONLY
+              </span>
+            </button>
+          )}
         </nav>
 
         <div className="p-4 border-t border-white/8 space-y-3">

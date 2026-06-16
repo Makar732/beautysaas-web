@@ -193,6 +193,59 @@ app.post('/api/send-notification', async (req, res) => {
   }
 });
 
+app.post('/api/broadcast', async (req, res) => {
+  const { admin_id, message, targets } = req.body;
+
+  const ADMIN_UUID = process.env.ADMIN_UUID || 'СЮДА_ВСТАВЬ_СВОЙ_UUID';
+  if (admin_id !== ADMIN_UUID) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  if (!message || !targets || !Array.isArray(targets)) {
+    return res.status(400).json({ error: 'Invalid payload' });
+  }
+
+  const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+  if (!BOT_TOKEN) {
+    return res.status(500).json({ error: 'Bot token not configured' });
+  }
+
+  let sent = 0;
+  const errors = [];
+
+  for (const target of targets) {
+    const chatId = target.telegram_id;
+    if (!chatId) continue;
+
+    try {
+      const telegramRes = await fetch(
+        `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: `📢 *Объявление от BeautySaaS*\n\n${message}`,
+            parse_mode: 'Markdown',
+          }),
+        }
+      );
+
+      const telegramData = await telegramRes.json();
+      if (telegramData.ok) {
+        sent++;
+      } else {
+        errors.push({ id: target.id, error: telegramData.description });
+      }
+    } catch (err) {
+      errors.push({ id: target.id, error: err.message });
+    }
+  }
+
+  console.log(`[Broadcast] Отправлено: ${sent}/${targets.length}`);
+  res.json({ success: true, sent, total: targets.length, errors });
+});
+
 // ===== API: Рассылка напоминаний клиентам =====
 app.post('/api/send-reminders', async (req, res) => {
   console.log('📬 Запущена рассылка напоминаний...');
