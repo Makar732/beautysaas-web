@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, User, Phone, ArrowRight, Loader2 } from 'lucide-react';
+import { Sparkles, ArrowRight, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
@@ -8,15 +8,15 @@ import { PhoneInput, isPhoneComplete } from '../components/ui/PhoneInput';
 
 export default function OnboardingPage() {
   const navigate = useNavigate();
-  const { completeOnboarding, needsOnboarding, isAuthenticated, isLoading } = useAuth();
+  const { completeOnboarding, needsOnboarding, isAuthenticated, isLoading } =
+    useAuth();
 
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [errors, setErrors] = useState<{ name?: string; phone?: string }>({});
   const [submitting, setSubmitting] = useState(false);
 
-  // Если пользователь уже полностью авторизован — отправляем в dashboard
-  // Если не нужен онбординг и не авторизован — на логин
+  // Редиректы — срабатывают ТОЛЬКО когда isLoading === false
   useEffect(() => {
     if (isLoading) return;
     if (isAuthenticated) {
@@ -46,10 +46,19 @@ export default function OnboardingPage() {
     navigate('/dashboard', { replace: true });
   };
 
+  // Пока загрузка — показываем лоадер, редиректов нет
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <Loader2 className="animate-spin text-emerald-400" size={48} />
+        <div className="flex flex-col items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Sparkles className="text-amber-400" size={28} />
+            <span className="text-2xl font-bold text-white">
+              Beauty<span className="text-emerald-400">SaaS</span>
+            </span>
+          </div>
+          <Loader2 size={36} className="animate-spin text-emerald-400" />
+        </div>
       </div>
     );
   }
@@ -96,34 +105,22 @@ export default function OnboardingPage() {
             </div>
           </div>
 
-          {/* Поле имени */}
-          <div className="relative">
-            <Input
-              label="ФИО или название студии"
-              placeholder="Ирина Козлова или Студия Beauty"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              error={errors.name}
-            />
-            <User
-              size={18}
-              className="absolute right-4 top-[42px] text-gray-400 pointer-events-none"
-            />
-          </div>
+          {/* Поле имени — используем компонент Input */}
+          <Input
+            label="ФИО или название студии"
+            placeholder="Ирина Козлова или Студия Beauty"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            error={errors.name}
+          />
 
-          {/* Поле телефона */}
-          <div className="relative">
-            <PhoneInput
-              label="Номер телефона"
-              value={phone}
-              onChange={setPhone}
-              error={errors.phone}
-            />
-            <Phone
-              size={18}
-              className="absolute right-4 top-[42px] text-gray-400 pointer-events-none"
-            />
-          </div>
+          {/* Поле телефона — теперь стилизован идентично Input */}
+          <PhoneInput
+            label="Номер телефона"
+            value={phone}
+            onChange={setPhone}
+            error={errors.phone}
+          />
 
           {/* Кнопка */}
           <Button

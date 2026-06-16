@@ -37,15 +37,22 @@ function checkTrial(trialStartDate?: string): { isActive: boolean; daysLeft: num
   if (!trialStartDate) return { isActive: true, daysLeft: 14 };
   const start = new Date(trialStartDate);
   const now = new Date();
-  const diffDays = Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+  const diffDays = Math.floor(
+    (now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)
+  );
   const daysLeft = Math.max(0, 14 - diffDays);
   return { isActive: daysLeft > 0, daysLeft };
 }
 
-function isProfileComplete(master: { name?: string | null; phone?: string | null }): boolean {
-  const hasName = typeof master.name === 'string' && master.name.trim().length >= 2;
+function isProfileComplete(master: {
+  name?: string | null;
+  phone?: string | null;
+}): boolean {
+  const hasName =
+    typeof master.name === 'string' && master.name.trim().length >= 2;
   const hasPhone =
-    typeof master.phone === 'string' && master.phone.replace(/\D/g, '').length >= 10;
+    typeof master.phone === 'string' &&
+    master.phone.replace(/\D/g, '').length >= 10;
   return hasName && hasPhone;
 }
 
@@ -54,14 +61,21 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  // ✅ isLoading начинает как true — редиректы заблокированы до завершения
+  // проверки профиля в Supabase
   const [isLoading, setIsLoading] = useState(true);
 
+  // ─── После успешного входа проверяем профиль в БД ───────────────────────
+  // ВАЖНО: setIsLoading(false) вызывается ТОЛЬКО здесь, после того как
+  // запрос к public.profiles завершился (успешно или с ошибкой).
+  // Это предотвращает бесконечный редирект на /onboarding при перезагрузке.
   const handleSignedIn = useCallback(
     async (authUserId: string, authUserEmail: string) => {
       try {
         const profile = await getMasterById(authUserId);
 
         if (profile && isProfileComplete(profile)) {
+          // ✅ Профиль полный — пускаем в dashboard
           const appUser: AppUser = {
             id: profile.id,
             name: profile.name!,
@@ -81,6 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(appUser);
           setNeedsOnboarding(false);
         } else {
+          // ✅ Профиля нет или не заполнен — отправляем на онбординг
           sessionStorage.setItem('pending_user_id', authUserId);
           sessionStorage.setItem('pending_user_email', authUserEmail);
           setUser(null);
@@ -90,35 +105,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.error('❌ Ошибка в handleSignedIn:', err);
         setUser(null);
         setNeedsOnboarding(true);
+      } finally {
+        // ✅ Загрузка завершена ТОЛЬКО после ответа от profiles
+        setIsLoading(false);
       }
     },
     []
   );
 
+  // ─── Инициализация ───────────────────────────────────────────────────────
   useEffect(() => {
     initStorage();
 
+    // Локальный кэш для мгновенного первого рендера (не влияет на isLoading)
     const savedUser = getUser();
     if (savedUser && isProfileComplete(savedUser)) {
       setUser(savedUser);
       setNeedsOnboarding(false);
     }
 
+    // Проверяем реальную сессию Supabase
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
+        // handleSignedIn сам вызовет setIsLoading(false) в finally
         await handleSignedIn(session.user.id, session.user.email || '');
       } else {
+        // Нет сессии — сразу снимаем загрузку
         clearUser();
         setUser(null);
         setNeedsOnboarding(false);
+        setIsLoading(false);
       }
-      setIsLoading(false);
     });
 
+    // Слушаем изменения сессии
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
+      if (
+        (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') &&
+        session?.user
+      ) {
+        // handleSignedIn сам вызовет setIsLoading(false) в finally
         await handleSignedIn(session.user.id, session.user.email || '');
       }
 
@@ -127,14 +155,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         sessionStorage.clear();
         setUser(null);
         setNeedsOnboarding(false);
+        setIsLoading(false);
       }
-
-      setIsLoading(false);
     });
 
     return () => subscription.unsubscribe();
   }, [handleSignedIn]);
 
+  // ─── Вход по email + пароль ──────────────────────────────────────────────
   const loginWithEmail = async (
     email: string,
     password: string
@@ -143,6 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error ? error.message : null };
   };
 
+  // ─── Регистрация по email + пароль ──────────────────────────────────────
   const registerWithEmail = async (
     email: string,
     password: string
@@ -158,6 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: null };
   };
 
+  // ─── Завершение онбординга ───────────────────────────────────────────────
   const completeOnboarding = async (name: string, phone: string): Promise<void> => {
     const userId =
       sessionStorage.getItem('pending_user_id') || `master-${Date.now()}`;
@@ -202,14 +232,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     sessionStorage.removeItem('pending_user_email');
   };
 
+  // ─── Выход ───────────────────────────────────────────────────────────────
   const logout = async (): Promise<void> => {
     await supabase.auth.signOut();
     clearUser();
     sessionStorage.clear();
     setUser(null);
     setNeedsOnboarding(false);
+    setIsLoading(false);
   };
 
+  // ─── Обновление данных пользователя ─────────────────────────────────────
   const updateUser = async (updates: Partial<AppUser>): Promise<void> => {
     if (!user) return;
     const updated: AppUser = { ...user, ...updates };
