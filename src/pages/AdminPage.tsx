@@ -1,28 +1,29 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Shield, Users, Star, TrendingUp, Send, RefreshCw,
   Crown, Phone, Calendar, AlertCircle, CheckCircle,
-  Loader2, Sparkles, LogOut, ChevronLeft,
+  Loader2, Sparkles, LogOut, ChevronLeft, Trash2,
+  StarOff, RotateCcw, Gift,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 
 // ============================================================
-// ⚠️  ВСТАВЬ СВОЙ UUID ИЗ SUPABASE → Authentication → Users
-// ============================================================
 const ADMIN_UUID = '789e7654-c21d-4edc-9ad8-a5a316aad726';
 // ============================================================
 
-const PREMIUM_PRICE = 990; // ₽/мес
+const PREMIUM_PRICE = 990;
+const TRIAL_DAYS = 14;
 
-// ---------- Типы ----------
+// ─── Типы ────────────────────────────────────────────────────
 interface MasterRow {
   id: string;
   name: string;
   phone: string;
   slug: string;
   is_premium: boolean;
+  premium_expires_at: string | null;
   trial_start_date: string | null;
   created_at: string;
   telegram_id: string | null;
@@ -35,160 +36,396 @@ interface Stats {
   mrr: number;
 }
 
-// ---------- Helpers ----------
-function getSubscriptionLabel(master: MasterRow): {
-  label: string;
-  color: string;
-} {
-  if (master.is_premium) {
-    return { label: '⭐ Premium', color: 'text-amber-600 bg-amber-50 border-amber-200' };
-  }
-  if (master.trial_start_date) {
-    const start = new Date(master.trial_start_date);
-    const diffDays = Math.floor(
-      (Date.now() - start.getTime()) / (1000 * 60 * 60 * 24)
-    );
-    const daysLeft = Math.max(0, 14 - diffDays);
-    if (daysLeft > 0) {
-      return {
-        label: `Триал (${daysLeft} дн.)`,
-        color: 'text-emerald-600 bg-emerald-50 border-emerald-200',
-      };
-    }
-  }
-  return { label: 'Бесплатный', color: 'text-gray-500 bg-gray-50 border-gray-200' };
+// Для каждой кнопки — своё состояние
+type BtnState = 'idle' | 'loading' | 'confirm' | 'success' | 'error';
+
+interface RowStates {
+  extend: BtnState;
+  revoke: BtnState;
+  grantTrial: BtnState;
+  resetTrial: BtnState;
+  delete: BtnState;
 }
 
-// ============================================================
-// КОМПОНЕНТ
-// ============================================================
+// ─── Helpers ──────────────────────────────────────────────────
+
+function daysUntil(isoDate: string | null | undefined): number {
+  if (!isoDate) return 0;
+  const target = new Date(isoDate);
+  const now = new Date();
+  target.setHours(0, 0, 0, 0);
+  now.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function trialDaysLeft(trialStartDate: string | null): number {
+  if (!trialStartDate) return TRIAL_DAYS;
+  const diffDays = Math.floor(
+    (Date.now() - new Date(trialStartDate).getTime()) / (1000 * 60 * 60 * 24)
+  );
+  return Math.max(0, TRIAL_DAYS - diffDays);
+}
+
+interface SubStatus {
+  label: string;
+  detail: string;
+  badgeClass: string;
+}
+
+function getSubStatus(master: MasterRow): SubStatus {
+  if (master.is_premium) {
+    if (master.premium_expires_at) {
+      const days = daysUntil(master.premium_expires_at);
+      return {
+        label: 'Premium',
+        detail: days > 0 ? `Ещё ${days} дн.` : 'Истёк',
+        badgeClass: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
+      };
+    }
+    return {
+      label: 'Premium',
+      detail: 'Бессрочно',
+      badgeClass: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
+    };
+  }
+  const left = trialDaysLeft(master.trial_start_date);
+  if (left > 0) {
+    return {
+      label: 'Триал',
+      detail: `Осталось ${left} дн.`,
+      badgeClass: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
+    };
+  }
+  return {
+    label: 'Бесплатный',
+    detail: 'Триал истёк',
+    badgeClass: 'text-gray-500 bg-gray-500/10 border-gray-500/30',
+  };
+}
+
+function defaultRowStates(): RowStates {
+  return {
+    extend: 'idle',
+    revoke: 'idle',
+    grantTrial: 'idle',
+    resetTrial: 'idle',
+    delete: 'idle',
+  };
+}
+
+// ─── Универсальная кнопка действия ───────────────────────────
+interface ActionBtnProps {
+  btnState: BtnState;
+  onClick: () => void;
+  // стили по состоянию
+  idleClass: string;
+  idleContent: React.ReactNode;
+  confirmContent?: React.ReactNode;
+  confirmClass?: string;
+  successContent?: React.ReactNode;
+  successClass?: string;
+  // скрывать если false
+  visible?: boolean;
+  title?: string;
+}
+
+function ActionBtn({
+  btnState,
+  onClick,
+  idleClass,
+  idleContent,
+  confirmContent,
+  confirmClass,
+  successContent,
+  successClass,
+  visible = true,
+  title,
+}: ActionBtnProps) {
+  if (!visible) return null;
+
+  const isDisabled = btnState === 'loading' || btnState === 'success';
+
+  const cls = {
+    idle: idleClass,
+    loading: `${idleClass} opacity-60`,
+    confirm: confirmClass ?? 'bg-red-600/30 text-red-300 border-red-500/40 animate-pulse',
+    success: successClass ?? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+    error: 'bg-red-500/10 text-red-400 border-red-500/20',
+  }[btnState];
+
+  const content = {
+    idle: idleContent,
+    loading: <><Loader2 size={11} className="animate-spin shrink-0" /><span>...</span></>,
+    confirm: confirmContent ?? idleContent,
+    success: successContent ?? <><CheckCircle size={11} className="shrink-0" /><span>Готово</span></>,
+    error: <><AlertCircle size={11} className="shrink-0" /><span>Ошибка</span></>,
+  }[btnState];
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={isDisabled}
+      title={title}
+      className={`
+        inline-flex items-center gap-1 text-xs font-semibold
+        px-2 py-1.5 rounded-lg border transition-all cursor-pointer
+        disabled:cursor-not-allowed whitespace-nowrap
+        ${cls}
+      `}
+    >
+      {content}
+    </button>
+  );
+}
+
+// ─── Основной компонент ───────────────────────────────────────
 export default function AdminPage() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
-  // --- Стейт ---
   const [masters, setMasters] = useState<MasterRow[]>([]);
   const [stats, setStats] = useState<Stats>({ totalMasters: 0, activePremium: 0, mrr: 0 });
   const [isLoading, setIsLoading] = useState(true);
+
+  // Broadcast
   const [broadcastText, setBroadcastText] = useState('');
   const [broadcastStatus, setBroadcastStatus] = useState<
     'idle' | 'sending' | 'success' | 'error'
   >('idle');
   const [broadcastResult, setBroadcastResult] = useState('');
-  const [extendingId, setExtendingId] = useState<string | null>(null);
-  const [extendResults, setExtendResults] = useState<Record<string, 'success' | 'error'>>({});
 
-  // --- Защита: только для ADMIN_UUID ---
+  // Состояния кнопок для каждой строки
+  const [rowStates, setRowStates] = useState<Record<string, RowStates>>({});
+
+  // Таймеры для авто-сброса "confirm"
+  const confirmTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
   const isAdmin = user?.id === ADMIN_UUID;
 
   useEffect(() => {
-    if (!user) {
-      navigate('/login', { replace: true });
-      return;
-    }
-    if (!isAdmin) {
-      navigate('/dashboard', { replace: true });
-      return;
-    }
+    if (!user) { navigate('/login', { replace: true }); return; }
+    if (!isAdmin) { navigate('/dashboard', { replace: true }); return; }
     loadData();
+    return () => {
+      Object.values(confirmTimers.current).forEach(clearTimeout);
+    };
   }, [user, isAdmin]);
 
-  // --- Загрузка данных ---
+  // ─── Загрузка ──────────────────────────────────────────────
   const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
       const { data, error } = await supabase
         .from('profiles')
         .select(
-          'id, name, phone, slug, is_premium, trial_start_date, created_at, telegram_id, telegram_chat_id'
+          'id,name,phone,slug,is_premium,premium_expires_at,trial_start_date,created_at,telegram_id,telegram_chat_id'
         )
         .order('created_at', { ascending: false });
 
       if (error) throw error;
 
-      const rows = (data as MasterRow[]) || [];
-      setMasters(rows);
+      const rows = (data as MasterRow[]) ?? [];
+      // Оставляем только реальных пользователей (прошли онбординг)
+      const real = rows.filter(
+        (m) => m.name?.trim().length >= 2 && m.phone?.trim().length >= 5
+      );
 
-      const totalMasters = rows.length;
-      const activePremium = rows.filter((m) => m.is_premium).length;
-      const mrr = activePremium * PREMIUM_PRICE;
-      setStats({ totalMasters, activePremium, mrr });
+      setMasters(real);
+
+      const initStates: Record<string, RowStates> = {};
+      real.forEach((m) => { initStates[m.id] = defaultRowStates(); });
+      setRowStates(initStates);
+
+      const activePremium = real.filter((m) => m.is_premium).length;
+      setStats({
+        totalMasters: real.length,
+        activePremium,
+        mrr: activePremium * PREMIUM_PRICE,
+      });
     } catch (err) {
-      console.error('❌ Ошибка загрузки мастеров:', err);
+      console.error('❌ Ошибка загрузки:', err);
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  // --- Продлить Premium на 30 дней ---
-  const handleExtendPremium = async (master: MasterRow) => {
-    setExtendingId(master.id);
+  // ─── Хелперы стейта ────────────────────────────────────────
+  const setBtn = (masterId: string, btn: keyof RowStates, state: BtnState) => {
+    setRowStates((prev) => ({
+      ...prev,
+      [masterId]: { ...(prev[masterId] ?? defaultRowStates()), [btn]: state },
+    }));
+  };
+
+  const patchMaster = (masterId: string, patch: Partial<MasterRow>) => {
+    setMasters((prev) => {
+      const updated = prev.map((m) => m.id === masterId ? { ...m, ...patch } : m);
+      const activePremium = updated.filter((m) => m.is_premium).length;
+      setStats({ totalMasters: updated.length, activePremium, mrr: activePremium * PREMIUM_PRICE });
+      return updated;
+    });
+  };
+
+  const autoReset = (key: string, masterId: string, btn: keyof RowStates, delay = 3000) => {
+    clearTimeout(confirmTimers.current[key]);
+    confirmTimers.current[key] = setTimeout(
+      () => setBtn(masterId, btn, 'idle'),
+      delay
+    );
+  };
+
+  // ─── 1. Продлить Premium +30 дней ──────────────────────────
+  const handleExtend = async (master: MasterRow) => {
+    if (rowStates[master.id]?.extend === 'loading') return;
+    setBtn(master.id, 'extend', 'loading');
     try {
-      // Если подписка уже активна — продлеваем от сегодня + 30 дней
-      // (логика: просто включаем is_premium = true; для полноценного решения
-      //  нужна колонка premium_expires_at — см. NOTE ниже)
+      const base = (() => {
+        if (master.premium_expires_at) {
+          const exp = new Date(master.premium_expires_at);
+          return exp > new Date() ? exp : new Date();
+        }
+        return new Date();
+      })();
+      const newExpiry = new Date(base);
+      newExpiry.setDate(newExpiry.getDate() + 30);
+
       const { error } = await supabase
         .from('profiles')
-        .update({ is_premium: true })
+        .update({ is_premium: true, premium_expires_at: newExpiry.toISOString() })
         .eq('id', master.id);
-
       if (error) throw error;
 
-      // Обновляем локальный стейт без перезагрузки
-      setMasters((prev) =>
-        prev.map((m) =>
-          m.id === master.id ? { ...m, is_premium: true } : m
-        )
-      );
-      setStats((prev) => {
-        const wasAlreadyPremium = master.is_premium;
-        const newActivePremium = wasAlreadyPremium
-          ? prev.activePremium
-          : prev.activePremium + 1;
-        return {
-          ...prev,
-          activePremium: newActivePremium,
-          mrr: newActivePremium * PREMIUM_PRICE,
-        };
-      });
-      setExtendResults((prev) => ({ ...prev, [master.id]: 'success' }));
-      setTimeout(
-        () => setExtendResults((prev) => ({ ...prev, [master.id]: undefined as any })),
-        3000
-      );
-    } catch (err) {
-      console.error('❌ Ошибка продления Premium:', err);
-      setExtendResults((prev) => ({ ...prev, [master.id]: 'error' }));
-      setTimeout(
-        () => setExtendResults((prev) => ({ ...prev, [master.id]: undefined as any })),
-        3000
-      );
-    } finally {
-      setExtendingId(null);
+      patchMaster(master.id, { is_premium: true, premium_expires_at: newExpiry.toISOString() });
+      setBtn(master.id, 'extend', 'success');
+      autoReset(`ext_${master.id}`, master.id, 'extend');
+    } catch {
+      setBtn(master.id, 'extend', 'error');
+      autoReset(`ext_${master.id}`, master.id, 'extend');
     }
   };
 
-  // --- Массовая рассылка ---
+  // ─── 2. Снять Premium (двойное подтверждение) ──────────────
+  const handleRevoke = async (master: MasterRow) => {
+    const state = rowStates[master.id]?.revoke;
+    if (state === 'loading') return;
+
+    if (state !== 'confirm') {
+      setBtn(master.id, 'revoke', 'confirm');
+      autoReset(`rev_${master.id}`, master.id, 'revoke', 4000);
+      return;
+    }
+    clearTimeout(confirmTimers.current[`rev_${master.id}`]);
+    setBtn(master.id, 'revoke', 'loading');
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ is_premium: false, premium_expires_at: null })
+        .eq('id', master.id);
+      if (error) throw error;
+
+      patchMaster(master.id, { is_premium: false, premium_expires_at: null });
+      setBtn(master.id, 'revoke', 'success');
+      autoReset(`rev_${master.id}`, master.id, 'revoke');
+    } catch {
+      setBtn(master.id, 'revoke', 'error');
+      autoReset(`rev_${master.id}`, master.id, 'revoke');
+    }
+  };
+
+  // ─── 3. Дать триал +14 дней ────────────────────────────────
+  const handleGrantTrial = async (master: MasterRow) => {
+    if (rowStates[master.id]?.grantTrial === 'loading') return;
+    setBtn(master.id, 'grantTrial', 'loading');
+    try {
+      const newStart = new Date().toISOString();
+      const { error } = await supabase
+        .from('profiles')
+        .update({ trial_start_date: newStart })
+        .eq('id', master.id);
+      if (error) throw error;
+
+      patchMaster(master.id, { trial_start_date: newStart });
+      setBtn(master.id, 'grantTrial', 'success');
+      autoReset(`gt_${master.id}`, master.id, 'grantTrial');
+    } catch {
+      setBtn(master.id, 'grantTrial', 'error');
+      autoReset(`gt_${master.id}`, master.id, 'grantTrial');
+    }
+  };
+
+  // ─── 4. Сбросить триал (−15 дней) ──────────────────────────
+  const handleResetTrial = async (master: MasterRow) => {
+    if (rowStates[master.id]?.resetTrial === 'loading') return;
+    setBtn(master.id, 'resetTrial', 'loading');
+    try {
+      const expired = new Date();
+      expired.setDate(expired.getDate() - 15);
+      const { error } = await supabase
+        .from('profiles')
+        .update({ trial_start_date: expired.toISOString() })
+        .eq('id', master.id);
+      if (error) throw error;
+
+      patchMaster(master.id, { trial_start_date: expired.toISOString() });
+      setBtn(master.id, 'resetTrial', 'success');
+      autoReset(`rt_${master.id}`, master.id, 'resetTrial');
+    } catch {
+      setBtn(master.id, 'resetTrial', 'error');
+      autoReset(`rt_${master.id}`, master.id, 'resetTrial');
+    }
+  };
+
+  // ─── 5. Удалить профиль (двойное подтверждение) ─────────────
+  const handleDelete = async (master: MasterRow) => {
+    const state = rowStates[master.id]?.delete;
+    if (state === 'loading') return;
+
+    if (state !== 'confirm') {
+      setBtn(master.id, 'delete', 'confirm');
+      autoReset(`del_${master.id}`, master.id, 'delete', 4000);
+      return;
+    }
+    clearTimeout(confirmTimers.current[`del_${master.id}`]);
+    setBtn(master.id, 'delete', 'loading');
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('id', master.id);
+      if (error) throw error;
+
+      setMasters((prev) => {
+        const updated = prev.filter((m) => m.id !== master.id);
+        const activePremium = updated.filter((m) => m.is_premium).length;
+        setStats({ totalMasters: updated.length, activePremium, mrr: activePremium * PREMIUM_PRICE });
+        return updated;
+      });
+      setRowStates((prev) => {
+        const next = { ...prev };
+        delete next[master.id];
+        return next;
+      });
+    } catch {
+      setBtn(master.id, 'delete', 'error');
+      autoReset(`del_${master.id}`, master.id, 'delete');
+    }
+  };
+
+  // ─── Broadcast ─────────────────────────────────────────────
   const handleBroadcast = async () => {
     if (!broadcastText.trim()) return;
     setBroadcastStatus('sending');
     setBroadcastResult('');
-
     try {
-      // Собираем всех мастеров у которых есть telegram_id или telegram_chat_id
       const targets = masters.filter(
-        (m) => (m.telegram_id && m.telegram_id.trim()) ||
-                (m.telegram_chat_id && m.telegram_chat_id.trim())
+        (m) => m.telegram_id?.trim() || m.telegram_chat_id?.trim()
       );
-
-      if (targets.length === 0) {
+      if (!targets.length) {
         setBroadcastStatus('error');
         setBroadcastResult('Нет мастеров с привязанным Telegram.');
         return;
       }
-
-      // Отправляем через наш серверный endpoint (тот же, что использует telegram.ts)
-      const response = await fetch('/api/broadcast', {
+      const res = await fetch('/api/broadcast', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -201,75 +438,57 @@ export default function AdminPage() {
           })),
         }),
       });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(errText || 'Ошибка сервера');
-      }
-
-      const result = await response.json();
+      if (!res.ok) throw new Error(await res.text());
+      const result = await res.json();
       setBroadcastStatus('success');
-      setBroadcastResult(
-        `✅ Отправлено ${result.sent ?? targets.length} из ${targets.length} мастеров.`
-      );
+      setBroadcastResult(`✅ Отправлено ${result.sent ?? targets.length} из ${targets.length}.`);
       setBroadcastText('');
     } catch (err: any) {
-      console.error('❌ Ошибка рассылки:', err);
       setBroadcastStatus('error');
-      setBroadcastResult(`❌ Ошибка: ${err.message}`);
+      setBroadcastResult(`❌ ${err.message}`);
     }
   };
 
-  // --- Выход ---
-  const handleLogout = () => {
-    logout();
-    navigate('/');
-  };
-
-  // --- Guard ---
   if (!user || !isAdmin) return null;
 
-  // ============================================================
-  // RENDER
-  // ============================================================
+  // ─── RENDER ────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col">
 
-      {/* ===== TOP BAR ===== */}
-      <header className="bg-gray-900 border-b border-white/8 px-6 py-4 flex items-center justify-between sticky top-0 z-20">
-        <div className="flex items-center gap-4">
+      {/* TOP BAR */}
+      <header className="bg-gray-900 border-b border-white/8 px-4 sm:px-6 py-4 flex items-center justify-between sticky top-0 z-20">
+        <div className="flex items-center gap-3">
           <button
             onClick={() => navigate('/dashboard')}
-            className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 text-gray-400 hover:text-white transition-colors cursor-pointer"
           >
             <ChevronLeft size={18} />
-            <span className="text-sm">Назад</span>
+            <span className="text-sm hidden sm:block">Назад</span>
           </button>
-          <div className="w-px h-5 bg-white/10" />
+          <div className="w-px h-5 bg-white/10 hidden sm:block" />
           <div className="flex items-center gap-2">
-            <Sparkles className="text-amber-400" size={20} />
-            <span className="font-bold text-lg">
+            <Sparkles className="text-amber-400" size={18} />
+            <span className="font-bold">
               Beauty<span className="text-emerald-400">SaaS</span>
             </span>
-            <span className="ml-2 flex items-center gap-1 bg-red-500/20 text-red-400 text-xs font-bold px-2 py-0.5 rounded-full border border-red-500/30">
-              <Shield size={10} />
-              ADMIN
+            <span className="flex items-center gap-1 bg-red-500/20 text-red-400 text-xs font-bold px-2 py-0.5 rounded-full border border-red-500/30">
+              <Shield size={10} /> ADMIN
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <span className="text-sm text-gray-400 hidden sm:block">{user.name}</span>
           <button
             onClick={loadData}
             disabled={isLoading}
-            title="Обновить данные"
+            title="Обновить"
             className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-all cursor-pointer disabled:opacity-50"
           >
             <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
           </button>
           <button
-            onClick={handleLogout}
-            className="flex items-center gap-2 text-sm text-gray-400 hover:text-red-400 transition-colors cursor-pointer"
+            onClick={() => { logout(); navigate('/'); }}
+            className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-red-400 transition-colors cursor-pointer"
           >
             <LogOut size={16} />
             <span className="hidden sm:block">Выйти</span>
@@ -277,186 +496,132 @@ export default function AdminPage() {
         </div>
       </header>
 
-      {/* ===== MAIN ===== */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-8 space-y-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-8 space-y-10">
 
         <div>
-          <h1 className="text-2xl font-bold text-white">Панель администратора</h1>
+          <h1 className="text-2xl font-bold">Панель администратора</h1>
           <p className="text-gray-400 text-sm mt-1">
             Управление платформой BeautySaaS · Только для создателя
           </p>
         </div>
 
-        {/* ================================================ */}
-        {/* БЛОК А: БИЗНЕС-АНАЛИТИКА                        */}
-        {/* ================================================ */}
+        {/* ══════════════════════════════════════ */}
+        {/* БЛОК А: Аналитика                     */}
+        {/* ══════════════════════════════════════ */}
         <section>
-          <div className="flex items-center gap-2 mb-4">
-            <TrendingUp size={18} className="text-emerald-400" />
-            <h2 className="text-lg font-bold text-white">Блок А — Бизнес-аналитика</h2>
-          </div>
+          <SectionTitle icon={<TrendingUp size={18} className="text-emerald-400" />}>
+            Блок А — Бизнес-аналитика
+          </SectionTitle>
 
           {isLoading ? (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {[0, 1, 2].map((i) => (
-                <div
-                  key={i}
-                  className="bg-gray-900 rounded-2xl border border-white/8 p-6 animate-pulse h-28"
-                />
+                <div key={i} className="bg-gray-900 rounded-2xl border border-white/8 p-6 animate-pulse h-28" />
               ))}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {/* Карточка 1: Всего мастеров */}
-              <div className="bg-gray-900 rounded-2xl border border-white/8 p-6 hover:border-emerald-500/30 transition-colors">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 bg-emerald-500/10 rounded-xl flex items-center justify-center">
-                    <Users size={20} className="text-emerald-400" />
-                  </div>
-                  <p className="text-sm text-gray-400 font-medium">Всего мастеров</p>
-                </div>
-                <p className="text-4xl font-black text-white">{stats.totalMasters}</p>
-                <p className="text-xs text-gray-500 mt-2">
-                  зарегистрировано на платформе
-                </p>
-              </div>
-
-              {/* Карточка 2: Активный Premium */}
-              <div className="bg-gray-900 rounded-2xl border border-white/8 p-6 hover:border-amber-500/30 transition-colors">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center">
-                    <Star size={20} className="text-amber-400" />
-                  </div>
-                  <p className="text-sm text-gray-400 font-medium">Активный Premium</p>
-                </div>
-                <p className="text-4xl font-black text-amber-400">{stats.activePremium}</p>
-                <p className="text-xs text-gray-500 mt-2">
-                  платных подписчиков сейчас
-                </p>
-              </div>
-
-              {/* Карточка 3: MRR */}
-              <div className="bg-gray-900 rounded-2xl border border-white/8 p-6 hover:border-blue-500/30 transition-colors">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 bg-blue-500/10 rounded-xl flex items-center justify-center">
-                    <TrendingUp size={20} className="text-blue-400" />
-                  </div>
-                  <p className="text-sm text-gray-400 font-medium">
-                    Прогноз дохода (MRR)
-                  </p>
-                </div>
-                <p className="text-4xl font-black text-blue-400">
-                  {stats.mrr.toLocaleString('ru-RU')} ₽
-                </p>
-                <p className="text-xs text-gray-500 mt-2">
-                  {stats.activePremium} × {PREMIUM_PRICE.toLocaleString('ru-RU')} ₽/мес
-                </p>
-              </div>
+              <StatCard
+                icon={<Users size={20} className="text-emerald-400" />}
+                iconBg="bg-emerald-500/10"
+                label="Всего мастеров"
+                value={stats.totalMasters}
+                sub="реальных профилей"
+              />
+              <StatCard
+                icon={<Star size={20} className="text-amber-400" />}
+                iconBg="bg-amber-500/10"
+                label="Активный Premium"
+                value={stats.activePremium}
+                valueClass="text-amber-400"
+                sub="платных подписчиков"
+              />
+              <StatCard
+                icon={<TrendingUp size={20} className="text-blue-400" />}
+                iconBg="bg-blue-500/10"
+                label="Прогноз дохода (MRR)"
+                value={`${stats.mrr.toLocaleString('ru-RU')} ₽`}
+                valueClass="text-blue-400"
+                sub={`${stats.activePremium} × ${PREMIUM_PRICE.toLocaleString('ru-RU')} ₽/мес`}
+              />
             </div>
           )}
         </section>
 
-        {/* ================================================ */}
-        {/* БЛОК Б: МАССОВАЯ РАССЫЛКА                       */}
-        {/* ================================================ */}
+        {/* ══════════════════════════════════════ */}
+        {/* БЛОК Б: Рассылка                      */}
+        {/* ══════════════════════════════════════ */}
         <section>
-          <div className="flex items-center gap-2 mb-4">
-            <Send size={18} className="text-blue-400" />
-            <h2 className="text-lg font-bold text-white">
-              Блок Б — Массовая рассылка через бота
-            </h2>
-          </div>
+          <SectionTitle icon={<Send size={18} className="text-blue-400" />}>
+            Блок Б — Массовая рассылка через бота
+          </SectionTitle>
 
-          <div className="bg-gray-900 rounded-2xl border border-white/8 p-6">
-            <p className="text-sm text-gray-400 mb-4">
-              Сообщение получат все мастера, у которых привязан Telegram.
-              Отправка идёт через <code className="text-emerald-400 bg-emerald-400/10 px-1.5 py-0.5 rounded text-xs">/api/broadcast</code>.
+          <div className="bg-gray-900 rounded-2xl border border-white/8 p-6 space-y-4">
+            <p className="text-sm text-gray-400">
+              Сообщение получат все мастера, у которых привязан Telegram. Отправка через{' '}
+              <code className="text-emerald-400 bg-emerald-400/10 px-1.5 py-0.5 rounded text-xs">
+                /api/broadcast
+              </code>
             </p>
+            <div>
+              <label className="text-sm font-medium text-gray-300 block mb-2">
+                Текст объявления
+              </label>
+              <textarea
+                value={broadcastText}
+                onChange={(e) => setBroadcastText(e.target.value)}
+                placeholder="Введите текст для всех мастеров платформы..."
+                rows={4}
+                className="w-full bg-gray-800 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 text-sm resize-none focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+              />
+              <p className="text-xs text-gray-600 mt-1">{broadcastText.length} символов</p>
+            </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-gray-300 block mb-2">
-                  Текст объявления
-                </label>
-                <textarea
-                  value={broadcastText}
-                  onChange={(e) => setBroadcastText(e.target.value)}
-                  placeholder="Введите текст сообщения для всех мастеров платформы..."
-                  rows={5}
-                  className="w-full bg-gray-800 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 text-sm resize-none focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all"
-                />
-                <p className="text-xs text-gray-600 mt-1">
-                  {broadcastText.length} символов
-                </p>
+            {broadcastStatus !== 'idle' && broadcastResult && (
+              <div className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm border ${
+                broadcastStatus === 'success'
+                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                  : broadcastStatus === 'error'
+                  ? 'bg-red-500/10 border-red-500/20 text-red-400'
+                  : 'bg-blue-500/10 border-blue-500/20 text-blue-400'
+              }`}>
+                {broadcastStatus === 'success' && <CheckCircle size={16} />}
+                {broadcastStatus === 'error' && <AlertCircle size={16} />}
+                {broadcastStatus === 'sending' && <Loader2 size={16} className="animate-spin" />}
+                {broadcastResult}
               </div>
+            )}
 
-              {/* Статус рассылки */}
-              {broadcastStatus !== 'idle' && broadcastResult && (
-                <div
-                  className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm border ${
-                    broadcastStatus === 'success'
-                      ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-                      : broadcastStatus === 'error'
-                      ? 'bg-red-500/10 border-red-500/20 text-red-400'
-                      : 'bg-blue-500/10 border-blue-500/20 text-blue-400'
-                  }`}
-                >
-                  {broadcastStatus === 'success' && <CheckCircle size={16} />}
-                  {broadcastStatus === 'error' && <AlertCircle size={16} />}
-                  {broadcastStatus === 'sending' && (
-                    <Loader2 size={16} className="animate-spin" />
-                  )}
-                  {broadcastResult || 'Отправка...'}
-                </div>
-              )}
-
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-gray-500">
-                  Telegram-бот привязан у{' '}
-                  <span className="text-white font-semibold">
-                    {
-                      masters.filter(
-                        (m) =>
-                          (m.telegram_id && m.telegram_id.trim()) ||
-                          (m.telegram_chat_id && m.telegram_chat_id.trim())
-                      ).length
-                    }
-                  </span>{' '}
-                  из <span className="text-white font-semibold">{masters.length}</span> мастеров
-                </p>
-
-                <button
-                  onClick={handleBroadcast}
-                  disabled={
-                    !broadcastText.trim() || broadcastStatus === 'sending'
-                  }
-                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold px-5 py-2.5 rounded-xl transition-all text-sm cursor-pointer"
-                >
-                  {broadcastStatus === 'sending' ? (
-                    <Loader2 size={16} className="animate-spin" />
-                  ) : (
-                    <Send size={16} />
-                  )}
-                  {broadcastStatus === 'sending'
-                    ? 'Отправка...'
-                    : 'Отправить объявление всем мастерам'}
-                </button>
-              </div>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <p className="text-xs text-gray-500">
+                Telegram привязан у{' '}
+                <span className="text-white font-semibold">
+                  {masters.filter((m) => m.telegram_id?.trim() || m.telegram_chat_id?.trim()).length}
+                </span>{' '}
+                из <span className="text-white font-semibold">{masters.length}</span> мастеров
+              </p>
+              <button
+                onClick={handleBroadcast}
+                disabled={!broadcastText.trim() || broadcastStatus === 'sending'}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold px-5 py-2.5 rounded-xl transition-all text-sm cursor-pointer w-full sm:w-auto justify-center"
+              >
+                {broadcastStatus === 'sending'
+                  ? <Loader2 size={16} className="animate-spin" />
+                  : <Send size={16} />}
+                {broadcastStatus === 'sending' ? 'Отправка...' : 'Отправить всем'}
+              </button>
             </div>
           </div>
         </section>
 
-        {/* ================================================ */}
-        {/* БЛОК В: УПРАВЛЕНИЕ МАСТЕРАМИ                    */}
-        {/* ================================================ */}
+        {/* ══════════════════════════════════════ */}
+        {/* БЛОК В: Таблица мастеров              */}
+        {/* ══════════════════════════════════════ */}
         <section className="pb-12">
           <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Crown size={18} className="text-amber-400" />
-              <h2 className="text-lg font-bold text-white">
-                Блок В — Управление мастерами
-              </h2>
-            </div>
+            <SectionTitle icon={<Crown size={18} className="text-amber-400" />}>
+              Блок В — Управление мастерами
+            </SectionTitle>
             <span className="text-xs text-gray-500 bg-gray-800 px-3 py-1 rounded-full">
               {masters.length} мастеров
             </span>
@@ -474,56 +639,48 @@ export default function AdminPage() {
               </div>
             ) : (
               <>
-                {/* Таблица — Desktop */}
-                <div className="hidden md:block overflow-x-auto">
+                {/* ══════════ DESKTOP TABLE ══════════ */}
+                <div className="hidden lg:block overflow-x-auto">
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-white/8 bg-gray-800/50">
-                        <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wide px-6 py-4">
-                          Мастер / Студия
-                        </th>
-                        <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wide px-4 py-4">
-                          Телефон
-                        </th>
-                        <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wide px-4 py-4">
-                          Telegram
-                        </th>
-                        <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wide px-4 py-4">
-                          Статус подписки
-                        </th>
-                        <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wide px-4 py-4">
-                          Дата регистрации
-                        </th>
-                        <th className="text-right text-xs font-semibold text-gray-400 uppercase tracking-wide px-6 py-4">
-                          Действия
-                        </th>
+                        {[
+                          'Мастер / Студия',
+                          'Телефон',
+                          'Telegram',
+                          'Статус подписки',
+                          'Регистрация',
+                          'Действия',
+                        ].map((h) => (
+                          <th
+                            key={h}
+                            className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wide px-4 py-3 first:pl-6 last:pr-6"
+                          >
+                            {h}
+                          </th>
+                        ))}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
                       {masters.map((master) => {
-                        const sub = getSubscriptionLabel(master);
-                        const result = extendResults[master.id];
-                        const isExtending = extendingId === master.id;
-                        const hasTelegram =
-                          (master.telegram_id && master.telegram_id.trim()) ||
-                          (master.telegram_chat_id && master.telegram_chat_id.trim());
+                        const sub = getSubStatus(master);
+                        const states = rowStates[master.id] ?? defaultRowStates();
+                        const hasTg = !!(master.telegram_id?.trim() || master.telegram_chat_id?.trim());
 
                         return (
-                          <tr
-                            key={master.id}
-                            className="hover:bg-white/3 transition-colors group"
-                          >
-                            {/* Имя */}
-                            <td className="px-6 py-4">
+                          <tr key={master.id} className="hover:bg-white/3 transition-colors align-top">
+
+                            {/* Мастер */}
+                            <td className="pl-6 pr-4 py-4">
                               <div className="flex items-center gap-3">
                                 <div className="w-9 h-9 bg-emerald-700 rounded-full flex items-center justify-center text-sm font-bold shrink-0">
                                   {master.name?.charAt(0)?.toUpperCase() || '?'}
                                 </div>
-                                <div>
-                                  <p className="text-sm font-semibold text-white">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-semibold text-white truncate max-w-[160px]">
                                     {master.name || '—'}
                                   </p>
-                                  <p className="text-xs text-gray-500 font-mono">
+                                  <p className="text-xs text-gray-500 font-mono truncate max-w-[160px]">
                                     /book/{master.slug}
                                   </p>
                                 </div>
@@ -532,71 +689,140 @@ export default function AdminPage() {
 
                             {/* Телефон */}
                             <td className="px-4 py-4">
-                              <div className="flex items-center gap-2 text-sm text-gray-300">
-                                <Phone size={13} className="text-gray-500" />
-                                {master.phone || '—'}
+                              <div className="flex items-center gap-1.5 text-sm text-gray-300">
+                                <Phone size={12} className="text-gray-500 shrink-0" />
+                                <span className="whitespace-nowrap">{master.phone || '—'}</span>
                               </div>
                             </td>
 
                             {/* Telegram */}
                             <td className="px-4 py-4">
-                              {hasTelegram ? (
+                              {hasTg ? (
                                 <span className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-1 rounded-lg">
                                   Привязан
                                 </span>
                               ) : (
-                                <span className="text-xs text-gray-600">Не привязан</span>
+                                <span className="text-xs text-gray-600">Нет</span>
                               )}
                             </td>
 
                             {/* Статус */}
                             <td className="px-4 py-4">
-                              <span
-                                className={`text-xs font-semibold px-2.5 py-1 rounded-lg border ${sub.color}`}
-                              >
-                                {sub.label}
-                              </span>
+                              <div className={`inline-flex flex-col px-2.5 py-1.5 rounded-xl border ${sub.badgeClass}`}>
+                                <span className="text-xs font-bold leading-tight">{sub.label}</span>
+                                <span className="text-xs opacity-70 leading-tight">{sub.detail}</span>
+                              </div>
                             </td>
 
-                            {/* Дата регистрации */}
+                            {/* Дата */}
                             <td className="px-4 py-4">
-                              <div className="flex items-center gap-2 text-xs text-gray-500">
+                              <div className="flex items-center gap-1.5 text-xs text-gray-500 whitespace-nowrap">
                                 <Calendar size={12} />
                                 {new Date(master.created_at).toLocaleDateString('ru-RU', {
-                                  day: 'numeric',
-                                  month: 'short',
-                                  year: 'numeric',
+                                  day: 'numeric', month: 'short', year: 'numeric',
                                 })}
                               </div>
                             </td>
 
-                            {/* Кнопка действия */}
-                            <td className="px-6 py-4 text-right">
-                              {result === 'success' ? (
-                                <span className="inline-flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 rounded-xl">
-                                  <CheckCircle size={13} />
-                                  Premium включён!
-                                </span>
-                              ) : result === 'error' ? (
-                                <span className="inline-flex items-center gap-1.5 text-xs text-red-400 bg-red-500/10 border border-red-500/20 px-3 py-2 rounded-xl">
-                                  <AlertCircle size={13} />
-                                  Ошибка
-                                </span>
-                              ) : (
-                                <button
-                                  onClick={() => handleExtendPremium(master)}
-                                  disabled={isExtending}
-                                  className="inline-flex items-center gap-2 text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 hover:border-amber-500/40 px-3 py-2 rounded-xl transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                  {isExtending ? (
-                                    <Loader2 size={13} className="animate-spin" />
-                                  ) : (
-                                    <Star size={13} />
-                                  )}
-                                  {isExtending ? 'Обновление...' : 'Продлить Premium +30д'}
-                                </button>
-                              )}
+                            {/* ══ ДЕЙСТВИЯ ══ */}
+                            <td className="px-4 pr-6 py-4">
+                              <div className="flex flex-col gap-1.5">
+
+                                {/* Ряд 1: Premium-действия */}
+                                <div className="flex flex-wrap gap-1.5">
+                                  {/* Продлить Premium +30д */}
+                                  <ActionBtn
+                                    btnState={states.extend}
+                                    onClick={() => handleExtend(master)}
+                                    idleClass="bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20"
+                                    idleContent={
+                                      <><Star size={11} className="shrink-0" /><span>+30 дн.</span></>
+                                    }
+                                    successContent={
+                                      <><CheckCircle size={11} className="shrink-0" /><span>Продлён!</span></>
+                                    }
+                                    successClass="bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                                    title="Продлить Premium на 30 дней"
+                                  />
+
+                                  {/* Снять Premium — только если is_premium */}
+                                  <ActionBtn
+                                    btnState={states.revoke}
+                                    onClick={() => handleRevoke(master)}
+                                    visible={master.is_premium}
+                                    idleClass="bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20"
+                                    idleContent={
+                                      <><StarOff size={11} className="shrink-0" /><span>Снять</span></>
+                                    }
+                                    confirmContent={
+                                      <><AlertCircle size={11} className="shrink-0" /><span>Уверен?</span></>
+                                    }
+                                    confirmClass="bg-red-600/40 text-red-300 border-red-500/50 animate-pulse"
+                                    successContent={
+                                      <><CheckCircle size={11} className="shrink-0" /><span>Снят</span></>
+                                    }
+                                    successClass="bg-gray-500/10 text-gray-400 border-gray-500/20"
+                                    title="Снять Premium (двойное подтверждение)"
+                                  />
+                                </div>
+
+                                {/* Ряд 2: Триал-действия */}
+                                <div className="flex flex-wrap gap-1.5">
+                                  {/* +14 дней триала */}
+                                  <ActionBtn
+                                    btnState={states.grantTrial}
+                                    onClick={() => handleGrantTrial(master)}
+                                    idleClass="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20"
+                                    idleContent={
+                                      <><Gift size={11} className="shrink-0" /><span>+14д триал</span></>
+                                    }
+                                    successContent={
+                                      <><CheckCircle size={11} className="shrink-0" /><span>Выдан</span></>
+                                    }
+                                    successClass="bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                                    title="Дать +14 дней триала"
+                                  />
+
+                                  {/* Сбросить триал */}
+                                  <ActionBtn
+                                    btnState={states.resetTrial}
+                                    onClick={() => handleResetTrial(master)}
+                                    idleClass="bg-orange-500/10 text-orange-400 border-orange-500/20 hover:bg-orange-500/20"
+                                    idleContent={
+                                      <><RotateCcw size={11} className="shrink-0" /><span>Сбр.триал</span></>
+                                    }
+                                    successContent={
+                                      <><CheckCircle size={11} className="shrink-0" /><span>Сброшен</span></>
+                                    }
+                                    successClass="bg-orange-500/10 text-orange-400 border-orange-500/20"
+                                    title="Сбросить триал (поставить −15 дней)"
+                                  />
+                                </div>
+
+                                {/* Ряд 3: Удалить профиль */}
+                                <div>
+                                  <ActionBtn
+                                    btnState={states.delete}
+                                    onClick={() => handleDelete(master)}
+                                    idleClass="bg-gray-800 text-gray-500 border-gray-700 hover:bg-red-900/20 hover:text-red-400 hover:border-red-500/30"
+                                    idleContent={
+                                      <><Trash2 size={11} className="shrink-0" /><span>Удалить профиль</span></>
+                                    }
+                                    confirmContent={
+                                      <><AlertCircle size={11} className="shrink-0" /><span>Точно удалить?</span></>
+                                    }
+                                    confirmClass="bg-red-600/30 text-red-300 border-red-500/40 animate-pulse"
+                                    successContent={
+                                      <span>Удалён</span>
+                                    }
+                                    successClass="bg-gray-800 text-gray-600 border-gray-700"
+                                    title="Удалить профиль (двойное подтверждение)"
+                                  />
+                                </div>
+
+                              </div>
                             </td>
+
                           </tr>
                         );
                       })}
@@ -604,63 +830,79 @@ export default function AdminPage() {
                   </table>
                 </div>
 
-                {/* Карточки — Mobile */}
-                <div className="md:hidden divide-y divide-white/5">
+                {/* ══════════ MOBILE CARDS ══════════ */}
+                <div className="lg:hidden divide-y divide-white/5">
                   {masters.map((master) => {
-                    const sub = getSubscriptionLabel(master);
-                    const result = extendResults[master.id];
-                    const isExtending = extendingId === master.id;
-                    const hasTelegram =
-                      (master.telegram_id && master.telegram_id.trim()) ||
-                      (master.telegram_chat_id && master.telegram_chat_id.trim());
+                    const sub = getSubStatus(master);
+                    const states = rowStates[master.id] ?? defaultRowStates();
+                    const hasTg = !!(master.telegram_id?.trim() || master.telegram_chat_id?.trim());
 
                     return (
                       <div key={master.id} className="p-4 space-y-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-emerald-700 rounded-full flex items-center justify-center font-bold shrink-0">
+                        {/* Шапка карточки */}
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 bg-emerald-700 rounded-full flex items-center justify-center font-bold text-sm shrink-0">
                             {master.name?.charAt(0)?.toUpperCase() || '?'}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-white truncate">
-                              {master.name || '—'}
-                            </p>
+                            <p className="font-semibold text-white truncate">{master.name || '—'}</p>
                             <p className="text-xs text-gray-500">{master.phone || '—'}</p>
                           </div>
-                          <span
-                            className={`text-xs font-semibold px-2 py-1 rounded-lg border shrink-0 ${sub.color}`}
-                          >
-                            {sub.label}
-                          </span>
+                          <div className={`shrink-0 flex flex-col items-end px-2.5 py-1.5 rounded-xl border ${sub.badgeClass}`}>
+                            <span className="text-xs font-bold leading-tight">{sub.label}</span>
+                            <span className="text-xs opacity-70 leading-tight">{sub.detail}</span>
+                          </div>
                         </div>
 
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3 text-xs text-gray-500">
-                            <span>{hasTelegram ? '🟢 Telegram' : '⚪ Без Telegram'}</span>
-                            <span>
-                              {new Date(master.created_at).toLocaleDateString('ru-RU')}
-                            </span>
-                          </div>
+                        {/* Мета */}
+                        <div className="flex items-center gap-3 text-xs text-gray-500">
+                          <span>{hasTg ? '🟢 Telegram' : '⚪ Нет TG'}</span>
+                          <span>·</span>
+                          <span>{new Date(master.created_at).toLocaleDateString('ru-RU')}</span>
+                        </div>
 
-                          {result === 'success' ? (
-                            <span className="inline-flex items-center gap-1 text-xs text-emerald-400">
-                              <CheckCircle size={12} /> Готово!
-                            </span>
-                          ) : result === 'error' ? (
-                            <span className="text-xs text-red-400">Ошибка</span>
-                          ) : (
-                            <button
-                              onClick={() => handleExtendPremium(master)}
-                              disabled={isExtending}
-                              className="flex items-center gap-1.5 text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20 px-3 py-2 rounded-xl cursor-pointer"
-                            >
-                              {isExtending ? (
-                                <Loader2 size={12} className="animate-spin" />
-                              ) : (
-                                <Star size={12} />
-                              )}
-                              +30 дней
-                            </button>
-                          )}
+                        {/* Кнопки */}
+                        <div className="flex flex-wrap gap-1.5">
+                          <ActionBtn
+                            btnState={states.extend}
+                            onClick={() => handleExtend(master)}
+                            idleClass="bg-amber-500/10 text-amber-400 border-amber-500/20"
+                            idleContent={<><Star size={11} /><span>+30 дн.</span></>}
+                            successClass="bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                          />
+                          <ActionBtn
+                            btnState={states.revoke}
+                            onClick={() => handleRevoke(master)}
+                            visible={master.is_premium}
+                            idleClass="bg-red-500/10 text-red-400 border-red-500/20"
+                            idleContent={<><StarOff size={11} /><span>Снять</span></>}
+                            confirmContent={<><AlertCircle size={11} /><span>Уверен?</span></>}
+                            confirmClass="bg-red-600/30 text-red-300 border-red-500/40 animate-pulse"
+                            successClass="bg-gray-500/10 text-gray-400 border-gray-500/20"
+                          />
+                          <ActionBtn
+                            btnState={states.grantTrial}
+                            onClick={() => handleGrantTrial(master)}
+                            idleClass="bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                            idleContent={<><Gift size={11} /><span>+14д</span></>}
+                            successClass="bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                          />
+                          <ActionBtn
+                            btnState={states.resetTrial}
+                            onClick={() => handleResetTrial(master)}
+                            idleClass="bg-orange-500/10 text-orange-400 border-orange-500/20"
+                            idleContent={<><RotateCcw size={11} /><span>Сбр.триал</span></>}
+                            successClass="bg-orange-500/10 text-orange-400 border-orange-500/20"
+                          />
+                          <ActionBtn
+                            btnState={states.delete}
+                            onClick={() => handleDelete(master)}
+                            idleClass="bg-gray-800 text-gray-500 border-gray-700"
+                            idleContent={<><Trash2 size={11} /><span>Удалить</span></>}
+                            confirmContent={<><AlertCircle size={11} /><span>Точно?</span></>}
+                            confirmClass="bg-red-600/30 text-red-300 border-red-500/40 animate-pulse"
+                            successClass="bg-gray-800 text-gray-600 border-gray-700"
+                          />
                         </div>
                       </div>
                     );
@@ -671,6 +913,46 @@ export default function AdminPage() {
           </div>
         </section>
       </main>
+    </div>
+  );
+}
+
+// ─── Sub-components ───────────────────────────────────────────
+
+function SectionTitle({
+  icon, children,
+}: {
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-2 mb-4">
+      {icon}
+      <h2 className="text-lg font-bold text-white">{children}</h2>
+    </div>
+  );
+}
+
+function StatCard({
+  icon, iconBg, label, value, sub, valueClass = 'text-white',
+}: {
+  icon: React.ReactNode;
+  iconBg: string;
+  label: string;
+  value: string | number;
+  sub: string;
+  valueClass?: string;
+}) {
+  return (
+    <div className="bg-gray-900 rounded-2xl border border-white/8 p-6 hover:border-white/15 transition-colors">
+      <div className="flex items-center gap-3 mb-3">
+        <div className={`w-10 h-10 ${iconBg} rounded-xl flex items-center justify-center`}>
+          {icon}
+        </div>
+        <p className="text-sm text-gray-400 font-medium">{label}</p>
+      </div>
+      <p className={`text-4xl font-black ${valueClass}`}>{value}</p>
+      <p className="text-xs text-gray-500 mt-2">{sub}</p>
     </div>
   );
 }
