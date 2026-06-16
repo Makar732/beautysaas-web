@@ -6,7 +6,8 @@ const { createClient } = require('@supabase/supabase-js');
 const app = express();
 app.use(express.json());
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const NOTIFY_BOT_TOKEN = process.env.TELEGRAM_NOTIFY_BOT_TOKEN;
+const SUPPORT_BOT_TOKEN = process.env.TELEGRAM_SUPPORT_BOT_TOKEN;
 const ADMIN_UUID = process.env.ADMIN_UUID;
 
 // Supabase клиент для серверных проверок
@@ -70,8 +71,8 @@ app.post('/api/send-notification', async (req, res) => {
     return res.status(400).json({ success: false, error: 'telegram_id обязателен' });
   }
 
-  if (!BOT_TOKEN) {
-    return res.status(500).json({ success: false, error: 'BOT_TOKEN не настроен' });
+  if (!NOTIFY_BOT_TOKEN) {
+    return res.status(500).json({ success: false, error: 'TELEGRAM_NOTIFY_BOT_TOKEN не настроен' });
   }
 
   // ── Получаем master_id из booking ──
@@ -102,7 +103,7 @@ app.post('/api/send-notification', async (req, res) => {
 
   try {
     const response = await fetch(
-      `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+      `https://api.telegram.org/bot${NOTIFY_BOT_TOKEN}/sendMessage`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -142,8 +143,8 @@ app.post('/api/broadcast', async (req, res) => {
     return res.status(400).json({ error: 'Некорректный запрос' });
   }
 
-  if (!BOT_TOKEN) {
-    return res.status(500).json({ error: 'BOT_TOKEN не настроен' });
+  if (!SUPPORT_BOT_TOKEN) {
+    return res.status(500).json({ error: 'TELEGRAM_SUPPORT_BOT_TOKEN не настроен' });
   }
 
   let sent = 0;
@@ -155,7 +156,7 @@ app.post('/api/broadcast', async (req, res) => {
 
     try {
       const tgRes = await fetch(
-        `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+        `https://api.telegram.org/bot${SUPPORT_BOT_TOKEN}/sendMessage`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
