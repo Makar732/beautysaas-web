@@ -7,6 +7,7 @@ import {
   ReactNode,
 } from 'react';
 import { supabase } from '../lib/supabase';
+import type { Provider } from '@supabase/supabase-js';
 import { AppUser } from '../types';
 import {
   getUser,
@@ -118,11 +119,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         console.log('🔐 handleSignedIn:', authUserEmail);
 
-        // 1. Ищем профиль в Supabase (таблица profiles)
         const existingMaster = await getMasterById(authUserId);
 
         if (existingMaster && isProfileComplete(existingMaster)) {
-          // ── ПРОФИЛЬ СУЩЕСТВУЕТ И ЗАПОЛНЕН ────────────────
           console.log('✅ Профиль найден и заполнен:', existingMaster.name);
 
           const appUser: AppUser = {
@@ -147,28 +146,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(appUser);
           setNeedsOnboarding(false);
         } else {
-          // ── ПРОФИЛЯ НЕТ ИЛИ ОН НЕ ЗАПОЛНЕН → ОНБОРДИНГ ──
           console.log('🆕 Профиль отсутствует или не заполнен → онбординг');
 
-          // Сохраняем данные OAuth во временное хранилище
           sessionStorage.setItem('oauth_user_id', authUserId);
           sessionStorage.setItem('oauth_user_email', authUserEmail);
 
-          // Безопасно извлекаем имя из метаданных Яндекса
           const rawName = extractDisplayName(metadata);
           sessionStorage.setItem('oauth_user_name', rawName);
 
-          // Если профиль есть но не заполнен — всё равно показываем онбординг
-          // (пользователь сам заполнит оставшиеся поля)
           setNeedsOnboarding(true);
-
-          // user остаётся null до завершения онбординга
-          // (чтобы ProtectedRoute не пустил в /dashboard)
           setUser(null);
         }
       } catch (err) {
         console.error('❌ Ошибка в handleSignedIn:', err);
-        // При ошибке — не блокируем UI, показываем онбординг
         setNeedsOnboarding(true);
         setUser(null);
       }
@@ -180,13 +170,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     initStorage();
 
-    // Шаг 1: Быстрый старт из localStorage (пока Supabase грузится)
     const savedUser = getUser();
     if (savedUser && isProfileComplete(savedUser)) {
       setUser(savedUser);
     }
 
-    // Шаг 2: Получаем текущую сессию (важно для OAuth-редиректа)
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
         await handleSignedIn(
@@ -195,11 +183,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           session.user.user_metadata || {}
         );
       }
-      // Скрываем лоадер — теперь точно знаем состояние
       setIsLoading(false);
     });
 
-    // Шаг 3: Слушаем все последующие изменения (OAuth редиректы, email login, logout)
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -235,18 +221,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // МЕТОДЫ АВТОРИЗАЦИИ
   // ─────────────────────────────────────────────────────────
 
-  /**
-   * Авторизация через Яндекс ID.
-   * Supabase поддерживает 'yandex' как встроенный провайдер.
-   * Настройте его в Supabase Dashboard → Authentication → Providers → Yandex.
-   */
   const loginWithYandex = async (): Promise<void> => {
     const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'yandex',
+      provider: 'yandex' as Provider,
       options: {
-        // После OAuth Яндекс вернёт сюда — страница AuthCallbackPage обработает
         redirectTo: `${window.location.origin}${window.location.pathname}#/auth/callback`,
-        // Запрашиваем базовые данные профиля у Яндекса
         scopes: 'login:email login:info login:avatar',
       },
     });
@@ -255,12 +234,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error('❌ Ошибка Яндекс OAuth:', error.message);
       throw error;
     }
-    // Браузер делает редирект на Яндекс — дальнейший код не выполняется
   };
 
-  /**
-   * Вход по email + пароль.
-   */
   const loginWithEmail = async (
     email: string,
     password: string
@@ -273,11 +248,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: null };
   };
 
-  /**
-   * Регистрация по email + пароль.
-   * После регистрации Supabase отправляет письмо подтверждения.
-   * Триал начинается после прохождения онбординга (completeOnboarding).
-   */
   const registerWithEmail = async (
     email: string,
     password: string
@@ -288,7 +258,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { error: error.message };
     }
 
-    // Если Supabase настроен без подтверждения email — сразу кладём в sessionStorage
     if (data.user) {
       sessionStorage.setItem('oauth_user_id', data.user.id);
       sessionStorage.setItem('oauth_user_email', email);
@@ -298,10 +267,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: null };
   };
 
-  /**
-   * Завершение онбординга: создаём/обновляем профиль в БД.
-   * Вызывается из формы LoginPage после ввода имени и телефона.
-   */
   const completeOnboarding = async (
     name: string,
     phone: string
@@ -327,7 +292,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       daysOff: [],
     };
 
-    // Сохраняем в Supabase
     await upsertMaster({
       id: newUser.id,
       name: newUser.name,
@@ -343,12 +307,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       created_at: new Date().toISOString(),
     });
 
-    // Обновляем локальный стейт
     saveUser(newUser);
     setUser(newUser);
     setNeedsOnboarding(false);
 
-    // Очищаем временное хранилище
     sessionStorage.removeItem('oauth_user_id');
     sessionStorage.removeItem('oauth_user_email');
     sessionStorage.removeItem('oauth_user_name');
@@ -356,9 +318,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     console.log('✅ Онбординг завершён, профиль создан:', newUser.name);
   };
 
-  /**
-   * Выход из аккаунта.
-   */
   const logout = async (): Promise<void> => {
     await supabase.auth.signOut();
     clearUser();
@@ -367,9 +326,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setNeedsOnboarding(false);
   };
 
-  /**
-   * Обновление данных профиля (из DashboardPage).
-   */
   const updateUser = async (updates: Partial<AppUser>): Promise<void> => {
     if (!user) return;
     const updated: AppUser = { ...user, ...updates };
@@ -393,9 +349,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(updated);
   };
 
-  // ─────────────────────────────────────────────────────────
-  // ВЫЧИСЛЯЕМЫЕ ЗНАЧЕНИЯ
-  // ─────────────────────────────────────────────────────────
   const { isActive: isTrialActive, daysLeft: trialDaysLeft } = checkTrial(
     user?.trial_start_date
   );
@@ -411,7 +364,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isPremium,
         isTrialActive,
         trialDaysLeft,
-        loginAsGuest: () => {}, // заглушка для обратной совместимости
+        loginAsGuest: () => {},
         loginWithYandex,
         loginWithEmail,
         registerWithEmail,
