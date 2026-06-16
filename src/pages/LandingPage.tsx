@@ -97,8 +97,6 @@ export default function LandingPage() {
 
   const maxRevenue = Math.max(...revenueData);
 
-  // Маршрут для демо-виджета
-  const demoRoute = DEMO_MASTER_SLUG ? `/book/${DEMO_MASTER_SLUG}` : '/book/demo';
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">

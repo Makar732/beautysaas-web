@@ -6,17 +6,29 @@ const { createClient } = require('@supabase/supabase-js');
 const app = express();
 app.use(express.json());
 
-const NOTIFY_BOT_TOKEN = process.env.TELEGRAM_NOTIFY_BOT_TOKEN;
-const SUPPORT_BOT_TOKEN = process.env.TELEGRAM_SUPPORT_BOT_TOKEN;
-const ADMIN_UUID = process.env.ADMIN_UUID;
+// ─── Токены двух ботов ────────────────────────────────────────
+// TELEGRAM_NOTIFY_BOT_TOKEN  — бот уведомлений о записях
+// TELEGRAM_SUPPORT_BOT_TOKEN — бот саппорта / оплаты PRO
+const NOTIFY_BOT_TOKEN   = process.env.TELEGRAM_NOTIFY_BOT_TOKEN;
+const SUPPORT_BOT_TOKEN  = process.env.TELEGRAM_SUPPORT_BOT_TOKEN;
+const ADMIN_UUID         = process.env.ADMIN_UUID;
 
-// Supabase клиент для серверных проверок
+// ─── Supabase (service_role обходит RLS) ─────────────────────
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY // service_role — обходит RLS
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ─── Хелпер: проверка активности подписки мастера ───────────
+// ════════════════════════════════════════════════════════════════
+// HELPERS
+// ════════════════════════════════════════════════════════════════
+
+/**
+ * Проверяет, активна ли подписка мастера.
+ * Premium  → true всегда
+ * Триал    → true если с trial_start_date прошло ≤ 14 дней
+ * Истёк    → false
+ */
 async function isMasterSubscriptionActive(masterId) {
   try {
     const { data, error } = await supabase
@@ -26,44 +38,179 @@ async function isMasterSubscriptionActive(masterId) {
       .single();
 
     if (error || !data) {
-      // Если не удалось получить профиль — пропускаем уведомление
-      console.warn(`[BeautySaaS] Не удалось получить профиль ${masterId}:`, error?.message);
+      console.warn(`[Notify] Профиль не найден ${masterId}:`, error?.message);
       return false;
     }
 
-    // Premium активен — всегда отправляем
     if (data.is_premium) return true;
 
-    // Проверяем триал
-    if (!data.trial_start_date) {
-      // Нет даты старта триала — считаем триал активным (новый пользователь)
-      return true;
-    }
+    if (!data.trial_start_date) return true; // новый пользователь
 
-    const trialStart = new Date(data.trial_start_date);
-    const now = new Date();
     const diffDays = Math.floor(
-      (now.getTime() - trialStart.getTime()) / (1000 * 60 * 60 * 24)
+      (Date.now() - new Date(data.trial_start_date).getTime()) / 86_400_000
     );
+    const active = diffDays <= 14;
 
-    const TRIAL_DAYS = 14;
-    const isTrialActive = diffDays <= TRIAL_DAYS;
-
-    if (!isTrialActive) {
-      console.log(
-        `[BeautySaaS] 🔕 Уведомление заблокировано для ${masterId} — триал истёк ${diffDays - TRIAL_DAYS} дн. назад`
-      );
+    if (!active) {
+      console.log(`[Notify] 🔕 Заблокировано для ${masterId} — триал истёк ${diffDays - 14} дн. назад`);
     }
-
-    return isTrialActive;
+    return active;
   } catch (err) {
-    console.error('[BeautySaaS] Ошибка проверки подписки:', err);
+    console.error('[Notify] Ошибка проверки подписки:', err);
     return false;
   }
 }
 
-// ─── /api/send-notification — уведомление о новой записи ─────
+/**
+ * Отправляет сообщение через указанного бота.
+ */
+async function sendTelegramMessage(botToken, chatId, text, parseMode = 'Markdown') {
+  const res = await fetch(
+    `https://api.telegram.org/bot${botToken}/sendMessage`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: parseMode }),
+    }
+  );
+  return res.json();
+}
+
+// ════════════════════════════════════════════════════════════════
+// WEBHOOK — БОТ УВЕДОМЛЕНИЙ (/start привязывает telegram_id)
+// ════════════════════════════════════════════════════════════════
+app.post('/api/webhook/notify', async (req, res) => {
+  res.sendStatus(200); // отвечаем Telegram сразу
+
+  const message = req.body?.message;
+  if (!message) return;
+
+  const chatId   = message.chat?.id;
+  const text     = message.text || '';
+  const username = message.from?.username || '';
+  const firstName = message.from?.first_name || 'Мастер';
+
+  // Обработка /start <masterId>
+  if (text.startsWith('/start')) {
+    const parts    = text.split(' ');
+    const masterId = parts[1]?.trim();
+
+    if (!masterId) {
+      await sendTelegramMessage(
+        NOTIFY_BOT_TOKEN, chatId,
+        `👋 Привет, ${firstName}!\n\nЭтот бот будет присылать вам уведомления о новых записях клиентов.\n\nДля привязки перейдите в панель управления BeautySaaS → Настройки → Telegram.`
+      );
+      return;
+    }
+
+    // Сохраняем telegram_id в профиль мастера
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        telegram_id:      String(chatId),
+        telegram_chat_id: String(chatId),
+      })
+      .eq('id', masterId);
+
+    if (error) {
+      console.error('[Webhook/notify] Ошибка записи telegram_id:', error.message);
+      await sendTelegramMessage(
+        NOTIFY_BOT_TOKEN, chatId,
+        '❌ Не удалось привязать аккаунт. Попробуйте ещё раз или обратитесь в поддержку.'
+      );
+      return;
+    }
+
+    await sendTelegramMessage(
+      NOTIFY_BOT_TOKEN, chatId,
+      `✅ *Аккаунт успешно привязан!*\n\n` +
+      `Привет, ${firstName}! 👋\n\n` +
+      `Теперь вы будете получать уведомления о каждой новой записи прямо сюда.\n\n` +
+      `📱 Управляйте записями в панели BeautySaaS.`
+    );
+
+    console.log(`[Webhook/notify] ✅ Привязан telegram_id=${chatId} к мастеру ${masterId}`);
+    return;
+  }
+
+  // Любое другое сообщение
+  await sendTelegramMessage(
+    NOTIFY_BOT_TOKEN, chatId,
+    `ℹ️ Этот бот предназначен только для получения уведомлений о записях.\n\nПо всем вопросам: @beautysaas_support_bot`
+  );
+});
+
+// ════════════════════════════════════════════════════════════════
+// WEBHOOK — БОТ САППОРТА (вопросы, оплата PRO)
+// ════════════════════════════════════════════════════════════════
+app.post('/api/webhook/support', async (req, res) => {
+  res.sendStatus(200);
+
+  const message = req.body?.message;
+  if (!message) return;
+
+  const chatId    = message.chat?.id;
+  const text      = message.text || '';
+  const firstName = message.from?.first_name || 'Пользователь';
+
+  if (text.startsWith('/start')) {
+    await sendTelegramMessage(
+      SUPPORT_BOT_TOKEN, chatId,
+      `👋 Привет, ${firstName}!\n\n` +
+      `Я бот поддержки *BeautySaaS*.\n\n` +
+      `*Что я умею:*\n` +
+      `• Отвечать на вопросы о платформе\n` +
+      `• Помочь с переходом на PRO-тариф\n` +
+      `• Решать технические проблемы\n\n` +
+      `Напишите ваш вопрос — мы ответим в течение нескольких минут! 💚`
+    );
+    return;
+  }
+
+  if (text.startsWith('/pro') || text.toLowerCase().includes('про') || text.toLowerCase().includes('оплат')) {
+    await sendTelegramMessage(
+      SUPPORT_BOT_TOKEN, chatId,
+      `⭐ *Тариф PRO — 990 ₽/месяц*\n\n` +
+      `✅ Онлайн-запись 24/7\n` +
+      `✅ Telegram-уведомления\n` +
+      `✅ Полная аналитика выручки\n` +
+      `✅ Неограниченные услуги\n` +
+      `✅ Приоритетная поддержка\n\n` +
+      `Для подключения напишите нам — мы активируем PRO вручную и свяжемся с вами для оплаты.`
+    );
+    return;
+  }
+
+  // Пересылаем сообщение администратору
+  if (ADMIN_UUID) {
+    const { data: adminProfile } = await supabase
+      .from('profiles')
+      .select('telegram_id, telegram_chat_id')
+      .eq('id', ADMIN_UUID)
+      .single();
+
+    const adminChatId = adminProfile?.telegram_id || adminProfile?.telegram_chat_id;
+    if (adminChatId) {
+      await sendTelegramMessage(
+        SUPPORT_BOT_TOKEN, adminChatId,
+        `📨 *Новое сообщение в саппорт*\n\n` +
+        `👤 От: ${firstName} (chat_id: ${chatId})\n` +
+        `💬 Текст: ${text}`
+      );
+    }
+  }
+
+  await sendTelegramMessage(
+    SUPPORT_BOT_TOKEN, chatId,
+    `✅ Ваше сообщение получено! Мы ответим в ближайшее время.\n\n` +
+    `⏱ Обычное время ответа: до 2 часов в рабочее время.`
+  );
+});
+
+// ════════════════════════════════════════════════════════════════
+// /api/send-notification — уведомление о новой записи клиента
 // Блокируется если триал истёк и нет Premium
+// ════════════════════════════════════════════════════════════════
 app.post('/api/send-notification', async (req, res) => {
   const { telegram_id, booking } = req.body;
 
@@ -75,66 +222,48 @@ app.post('/api/send-notification', async (req, res) => {
     return res.status(500).json({ success: false, error: 'TELEGRAM_NOTIFY_BOT_TOKEN не настроен' });
   }
 
-  // ── Получаем master_id из booking ──
+  // Проверяем подписку мастера
   const masterId = booking?.master_id;
-
   if (masterId) {
     const canNotify = await isMasterSubscriptionActive(masterId);
     if (!canNotify) {
-      // Тихо возвращаем success чтобы фронтенд не показывал ошибку клиенту
-      return res.json({
-        success: true,
-        blocked: true,
-        reason: 'trial_expired',
-      });
+      // Тихий успех — фронтенд не видит ошибки, клиент не знает о блокировке
+      return res.json({ success: true, blocked: true, reason: 'trial_expired' });
     }
   }
 
-  // ── Формируем текст уведомления ──
-  const text = `
-📅 *Новая запись!*
-
-👤 *Клиент:* ${booking?.clientName || '—'}
-📞 *Телефон:* ${booking?.clientPhone || '—'}
-💆 *Услуга:* ${booking?.serviceName || '—'}
-🗓 *Дата:* ${booking?.date || '—'}
-⏰ *Время:* ${booking?.time || '—'}
-  `.trim();
+  const text = [
+    '📅 *Новая запись!*',
+    '',
+    `👤 *Клиент:* ${booking?.clientName   || '—'}`,
+    `📞 *Телефон:* ${booking?.clientPhone  || '—'}`,
+    `💆 *Услуга:* ${booking?.serviceName   || '—'}`,
+    `🗓 *Дата:* ${booking?.date            || '—'}`,
+    `⏰ *Время:* ${booking?.time           || '—'}`,
+  ].join('\n');
 
   try {
-    const response = await fetch(
-      `https://api.telegram.org/bot${NOTIFY_BOT_TOKEN}/sendMessage`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: telegram_id,
-          text,
-          parse_mode: 'Markdown',
-        }),
-      }
-    );
-
-    const result = await response.json();
+    const result = await sendTelegramMessage(NOTIFY_BOT_TOKEN, telegram_id, text);
 
     if (!result.ok) {
-      console.error('[BeautySaaS] Telegram API error:', result.description);
+      console.error('[Notify] Telegram error:', result.description);
       return res.status(500).json({ success: false, error: result.description });
     }
 
     return res.json({ success: true });
   } catch (err) {
-    console.error('[BeautySaaS] Ошибка отправки:', err);
+    console.error('[Notify] Ошибка отправки:', err);
     return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// ─── /api/broadcast — рассылка от администратора ─────────────
-// НИКОГДА не блокируется — проверки подписки нет намеренно
+// ════════════════════════════════════════════════════════════════
+// /api/broadcast — рассылка администратора
+// НЕ блокируется по подписке — только проверка admin_id
+// ════════════════════════════════════════════════════════════════
 app.post('/api/broadcast', async (req, res) => {
   const { admin_id, message, targets } = req.body;
 
-  // Проверяем что запрос от администратора
   if (!ADMIN_UUID || admin_id !== ADMIN_UUID) {
     return res.status(403).json({ error: 'Forbidden' });
   }
@@ -151,43 +280,86 @@ app.post('/api/broadcast', async (req, res) => {
   const errors = [];
 
   for (const target of targets) {
-    const chatId = target.telegram_id;
-    if (!chatId || !String(chatId).trim()) continue;
+    const chatId = String(target.telegram_id || '').trim();
+    if (!chatId) continue;
 
     try {
-      const tgRes = await fetch(
-        `https://api.telegram.org/bot${SUPPORT_BOT_TOKEN}/sendMessage`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: chatId,
-            text: `📢 *Объявление от BeautySaaS*\n\n${message}`,
-            parse_mode: 'Markdown',
-          }),
-        }
+      const result = await sendTelegramMessage(
+        SUPPORT_BOT_TOKEN,
+        chatId,
+        `📢 *Объявление от BeautySaaS*\n\n${message}`
       );
 
-      const tgData = await tgRes.json();
-
-      if (tgData.ok) {
+      if (result.ok) {
         sent++;
       } else {
-        errors.push({ id: target.id, error: tgData.description });
-        console.warn(`[Broadcast] Не отправлено ${target.id}:`, tgData.description);
+        errors.push({ id: target.id, error: result.description });
+        console.warn(`[Broadcast] Не доставлено ${target.id}:`, result.description);
       }
     } catch (err) {
       errors.push({ id: target.id, error: err.message });
     }
   }
 
-  console.log(`[Broadcast] ✅ Отправлено: ${sent}/${targets.length}`);
+  console.log(`[Broadcast] ✅ ${sent}/${targets.length}`);
   return res.json({ success: true, sent, total: targets.length, errors });
 });
 
-// ─── Статика (React build) ────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// /api/set-webhook — регистрация вебхуков обоих ботов
+// Вызови один раз: POST /api/set-webhook?secret=ADMIN_UUID
+// ════════════════════════════════════════════════════════════════
+app.post('/api/set-webhook', async (req, res) => {
+  const { secret } = req.query;
+  if (secret !== ADMIN_UUID) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : process.env.PUBLIC_URL;
+
+  if (!baseUrl) {
+    return res.status(500).json({ error: 'PUBLIC_URL или RAILWAY_PUBLIC_DOMAIN не задан' });
+  }
+
+  const results = {};
+
+  // Webhook для бота уведомлений
+  if (NOTIFY_BOT_TOKEN) {
+    const r = await fetch(
+      `https://api.telegram.org/bot${NOTIFY_BOT_TOKEN}/setWebhook`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: `${baseUrl}/api/webhook/notify` }),
+      }
+    );
+    results.notify = await r.json();
+  }
+
+  // Webhook для бота саппорта
+  if (SUPPORT_BOT_TOKEN) {
+    const r = await fetch(
+      `https://api.telegram.org/bot${SUPPORT_BOT_TOKEN}/setWebhook`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: `${baseUrl}/api/webhook/support` }),
+      }
+    );
+    results.support = await r.json();
+  }
+
+  console.log('[Webhook] Результат:', results);
+  return res.json({ success: true, results });
+});
+
+// ════════════════════════════════════════════════════════════════
+// Статика React
+// ════════════════════════════════════════════════════════════════
 app.use(express.static(path.join(__dirname, 'dist')));
-app.get('*', (req, res) => {
+app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
