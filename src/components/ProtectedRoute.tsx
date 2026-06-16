@@ -16,7 +16,9 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
         <div className="flex flex-col items-center gap-4">
           <div className="flex items-center gap-2">
             <Sparkles className="text-amber-400" size={28} />
-            <span className="text-2xl font-bold text-white">Beauty<span className="text-emerald-400">SaaS</span></span>
+            <span className="text-2xl font-bold text-white">
+              Beauty<span className="text-emerald-400">SaaS</span>
+            </span>
           </div>
           <Loader2 size={36} className="animate-spin text-emerald-400" />
         </div>
@@ -24,7 +26,10 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     );
   }
 
-  if (needsOnboarding) return <Navigate to="/login" replace />;
+  // Профиль не заполнен — на онбординг
+  if (needsOnboarding) return <Navigate to="/onboarding" replace />;
+
+  // Не авторизован — на логин
   if (!isAuthenticated) return <Navigate to="/login" replace />;
 
   return <>{children}</>;

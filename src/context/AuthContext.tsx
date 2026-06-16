@@ -7,7 +7,6 @@ import {
   ReactNode,
 } from 'react';
 import { supabase } from '../lib/supabase';
-import type { Provider } from '@supabase/supabase-js';
 import { AppUser } from '../types';
 import {
   getUser,
@@ -27,24 +26,11 @@ interface AuthContextType {
   isPremium: boolean;
   isTrialActive: boolean;
   trialDaysLeft: number;
-  loginWithYandex: () => Promise<void>;
   loginWithEmail: (email: string, password: string) => Promise<{ error: string | null }>;
   registerWithEmail: (email: string, password: string) => Promise<{ error: string | null }>;
   completeOnboarding: (name: string, phone: string) => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (updates: Partial<AppUser>) => Promise<void>;
-  loginAsGuest: () => void;
-}
-
-function extractDisplayName(metadata: Record<string, unknown>): string {
-  return (
-    (metadata?.display_name as string) ||
-    (metadata?.real_name as string) ||
-    (metadata?.first_name as string) ||
-    (metadata?.full_name as string) ||
-    (metadata?.name as string) ||
-    ''
-  );
 }
 
 function checkTrial(trialStartDate?: string): { isActive: boolean; daysLeft: number } {
@@ -58,7 +44,8 @@ function checkTrial(trialStartDate?: string): { isActive: boolean; daysLeft: num
 
 function isProfileComplete(master: { name?: string | null; phone?: string | null }): boolean {
   const hasName = typeof master.name === 'string' && master.name.trim().length >= 2;
-  const hasPhone = typeof master.phone === 'string' && master.phone.replace(/\D/g, '').length >= 10;
+  const hasPhone =
+    typeof master.phone === 'string' && master.phone.replace(/\D/g, '').length >= 10;
   return hasName && hasPhone;
 }
 
@@ -70,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const handleSignedIn = useCallback(
-    async (authUserId: string, authUserEmail: string, metadata: Record<string, unknown>) => {
+    async (authUserId: string, authUserEmail: string) => {
       try {
         const profile = await getMasterById(authUserId);
 
@@ -94,17 +81,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(appUser);
           setNeedsOnboarding(false);
         } else {
-          sessionStorage.setItem('oauth_user_id', authUserId);
-          sessionStorage.setItem('oauth_user_email', authUserEmail);
-          sessionStorage.setItem('oauth_user_name', extractDisplayName(metadata));
-
-          setNeedsOnboarding(true);
+          sessionStorage.setItem('pending_user_id', authUserId);
+          sessionStorage.setItem('pending_user_email', authUserEmail);
           setUser(null);
+          setNeedsOnboarding(true);
         }
       } catch (err) {
         console.error('❌ Ошибка в handleSignedIn:', err);
-        setNeedsOnboarding(true);
         setUser(null);
+        setNeedsOnboarding(true);
       }
     },
     []
@@ -121,11 +106,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
-        await handleSignedIn(
-          session.user.id,
-          session.user.email || '',
-          session.user.user_metadata || {}
-        );
+        await handleSignedIn(session.user.id, session.user.email || '');
+      } else {
+        clearUser();
+        setUser(null);
+        setNeedsOnboarding(false);
       }
       setIsLoading(false);
     });
@@ -134,11 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
-        await handleSignedIn(
-          session.user.id,
-          session.user.email || '',
-          session.user.user_metadata || {}
-        );
+        await handleSignedIn(session.user.id, session.user.email || '');
       }
 
       if (event === 'SIGNED_OUT') {
@@ -147,39 +128,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
         setNeedsOnboarding(false);
       }
+
       setIsLoading(false);
     });
 
     return () => subscription.unsubscribe();
   }, [handleSignedIn]);
 
-  const loginWithYandex = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'yandex' as Provider,
-      options: { redirectTo: window.location.origin + '/auth/callback' },
-    });
-    if (error) throw error;
-  };
-
-  const loginWithEmail = async (email: string, password: string) => {
+  const loginWithEmail = async (
+    email: string,
+    password: string
+  ): Promise<{ error: string | null }> => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     return { error: error ? error.message : null };
   };
 
-  const registerWithEmail = async (email: string, password: string) => {
+  const registerWithEmail = async (
+    email: string,
+    password: string
+  ): Promise<{ error: string | null }> => {
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) return { error: error.message };
 
     if (data.user) {
-      sessionStorage.setItem('oauth_user_id', data.user.id);
-      sessionStorage.setItem('oauth_user_email', email);
-      sessionStorage.setItem('oauth_user_name', '');
+      sessionStorage.setItem('pending_user_id', data.user.id);
+      sessionStorage.setItem('pending_user_email', email);
     }
+
     return { error: null };
   };
 
-  const completeOnboarding = async (name: string, phone: string) => {
-    const userId = sessionStorage.getItem('oauth_user_id') || `master-${Date.now()}`;
+  const completeOnboarding = async (name: string, phone: string): Promise<void> => {
+    const userId =
+      sessionStorage.getItem('pending_user_id') || `master-${Date.now()}`;
     const slug = generateSlug(name);
     const trialStartDate = new Date().toISOString();
 
@@ -217,12 +198,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(newUser);
     setNeedsOnboarding(false);
 
-    sessionStorage.removeItem('oauth_user_id');
-    sessionStorage.removeItem('oauth_user_email');
-    sessionStorage.removeItem('oauth_user_name');
+    sessionStorage.removeItem('pending_user_id');
+    sessionStorage.removeItem('pending_user_email');
   };
 
-  const logout = async () => {
+  const logout = async (): Promise<void> => {
     await supabase.auth.signOut();
     clearUser();
     sessionStorage.clear();
@@ -230,7 +210,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setNeedsOnboarding(false);
   };
 
-  const updateUser = async (updates: Partial<AppUser>) => {
+  const updateUser = async (updates: Partial<AppUser>): Promise<void> => {
     if (!user) return;
     const updated: AppUser = { ...user, ...updates };
     await upsertMaster({
@@ -243,7 +223,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(updated);
   };
 
-  const { isActive: isTrialActive, daysLeft: trialDaysLeft } = checkTrial(user?.trial_start_date);
+  const { isActive: isTrialActive, daysLeft: trialDaysLeft } = checkTrial(
+    user?.trial_start_date
+  );
   const isPremium = user?.is_premium || false;
 
   return (
@@ -256,13 +238,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isPremium,
         isTrialActive,
         trialDaysLeft,
-        loginWithYandex,
         loginWithEmail,
         registerWithEmail,
         completeOnboarding,
         logout,
         updateUser,
-        loginAsGuest: () => {},
       }}
     >
       {children}
