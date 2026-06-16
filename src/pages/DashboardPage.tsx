@@ -589,17 +589,43 @@ export default function DashboardPage() {
         )}
 
         {/* Mobile Header */}
-        <div className="lg:hidden bg-gray-950 text-white px-4 py-4 flex items-center justify-between">
+        <div className="lg:hidden bg-gray-950 text-white px-4 py-3 flex items-center justify-between sticky top-0 z-20">
+          {/* Лого */}
           <div className="flex items-center gap-2">
-            <Sparkles className="text-amber-400" size={18} />
-            <span className="font-bold">Beauty<span className="text-emerald-400">SaaS</span></span>
+            <Sparkles className="text-amber-400" size={16} />
+            <span className="font-bold text-sm">
+              Beauty<span className="text-emerald-400">SaaS</span>
+            </span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-400">{user.name}</span>
-            <button onClick={handleLogout} className="text-gray-400 hover:text-white transition-colors cursor-pointer">
-              <LogOut size={18} />
-            </button>
+
+          {/* Центр: имя мастера + статус подписки */}
+          <div className="flex flex-col items-center">
+            <span className="text-xs text-gray-300 font-medium truncate max-w-[120px]">
+              {user.name}
+            </span>
+            {isPremium ? (
+              <span className="flex items-center gap-1 text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full mt-0.5 font-semibold">
+                <Star size={9} />
+                PRO
+              </span>
+            ) : isTrialActive ? (
+              <span className="flex items-center gap-1 text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full mt-0.5 font-medium">
+                Триал: {trialDaysLeft} дн.
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-xs bg-gray-500/20 text-gray-400 px-2 py-0.5 rounded-full mt-0.5">
+                Бесплатный
+              </span>
+            )}
           </div>
+
+          {/* Кнопка выхода */}
+          <button
+            onClick={handleLogout}
+            className="text-gray-400 hover:text-white transition-colors cursor-pointer p-1"
+          >
+            <LogOut size={17} />
+          </button>
         </div>
 
         {/* Page Header */}
