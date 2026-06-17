@@ -4,7 +4,7 @@ import {
   Shield, Users, Star, TrendingUp, Send, RefreshCw,
   Crown, Phone, Calendar, AlertCircle, CheckCircle,
   Loader2, Sparkles, LogOut, ChevronLeft, Trash2,
-  StarOff, RotateCcw, Gift,
+  StarOff, RotateCcw, Gift, Award,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -24,6 +24,7 @@ interface MasterRow {
   slug: string;
   is_premium: boolean;
   premium_expires_at: string | null;
+  plan_type: 'solo' | 'salon' | null;
   trial_start_date: string | null;
   created_at: string;
   telegram_id: string | null;
@@ -40,6 +41,7 @@ interface Stats {
 type BtnState = 'idle' | 'loading' | 'confirm' | 'success' | 'error';
 
 interface RowStates {
+  grantPlan: BtnState;   // ★ НОВОЕ — выдать план
   extend: BtnState;
   revoke: BtnState;
   grantTrial: BtnState;
@@ -74,16 +76,19 @@ interface SubStatus {
 
 function getSubStatus(master: MasterRow): SubStatus {
   if (master.is_premium) {
+    const planLabel = master.plan_type === 'salon' ? 'Салон PRO' : 'Соло PRO';
     if (master.premium_expires_at) {
       const days = daysUntil(master.premium_expires_at);
       return {
-        label: 'Premium',
+        label: planLabel,
         detail: days > 0 ? `Ещё ${days} дн.` : 'Истёк',
-        badgeClass: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
+        badgeClass: days > 0
+          ? 'text-amber-400 bg-amber-500/10 border-amber-500/30'
+          : 'text-red-400 bg-red-500/10 border-red-500/30',
       };
     }
     return {
-      label: 'Premium',
+      label: planLabel,
       detail: 'Бессрочно',
       badgeClass: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
     };
@@ -105,6 +110,7 @@ function getSubStatus(master: MasterRow): SubStatus {
 
 function defaultRowStates(): RowStates {
   return {
+    grantPlan: 'idle',
     extend: 'idle',
     revoke: 'idle',
     grantTrial: 'idle',
@@ -117,14 +123,12 @@ function defaultRowStates(): RowStates {
 interface ActionBtnProps {
   btnState: BtnState;
   onClick: () => void;
-  // стили по состоянию
   idleClass: string;
   idleContent: React.ReactNode;
   confirmContent?: React.ReactNode;
   confirmClass?: string;
   successContent?: React.ReactNode;
   successClass?: string;
-  // скрывать если false
   visible?: boolean;
   title?: string;
 }
@@ -194,6 +198,11 @@ export default function AdminPage() {
   >('idle');
   const [broadcastResult, setBroadcastResult] = useState('');
 
+  // ★ НОВОЕ — модалка выбора плана
+  const [showPlanModal, setShowPlanModal] = useState(false);
+  const [selectedMasterForPlan, setSelectedMasterForPlan] = useState<MasterRow | null>(null);
+  const [selectedPlanType, setSelectedPlanType] = useState<'solo' | 'salon'>('solo');
+
   // Состояния кнопок для каждой строки
   const [rowStates, setRowStates] = useState<Record<string, RowStates>>({});
 
@@ -218,14 +227,13 @@ export default function AdminPage() {
       const { data, error } = await supabase
         .from('profiles')
         .select(
-          'id,name,phone,slug,is_premium,premium_expires_at,trial_start_date,created_at,telegram_id,telegram_chat_id'
+          'id,name,phone,slug,is_premium,premium_expires_at,plan_type,trial_start_date,created_at,telegram_id,telegram_chat_id'
         )
         .order('created_at', { ascending: false });
 
       if (error) throw error;
 
       const rows = (data as MasterRow[]) ?? [];
-      // Оставляем только реальных пользователей (прошли онбординг)
       const real = rows.filter(
         (m) => m.name?.trim().length >= 2 && m.phone?.trim().length >= 5
       );
@@ -274,6 +282,48 @@ export default function AdminPage() {
     );
   };
 
+  // ─── ★ НОВОЕ: Выдать план (Соло/Салон) ─────────────────────
+  const handleGrantPlanClick = (master: MasterRow) => {
+    setSelectedMasterForPlan(master);
+    setSelectedPlanType(master.plan_type || 'solo');
+    setShowPlanModal(true);
+  };
+
+  const handleGrantPlanConfirm = async () => {
+    if (!selectedMasterForPlan) return;
+    setBtn(selectedMasterForPlan.id, 'grantPlan', 'loading');
+    try {
+      const now = new Date();
+      const expiry = new Date(now);
+      expiry.setDate(expiry.getDate() + 30);
+
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          is_premium: true,
+          plan_type: selectedPlanType,
+          premium_expires_at: expiry.toISOString(),
+        })
+        .eq('id', selectedMasterForPlan.id);
+
+      if (error) throw error;
+
+      patchMaster(selectedMasterForPlan.id, {
+        is_premium: true,
+        plan_type: selectedPlanType,
+        premium_expires_at: expiry.toISOString(),
+      });
+
+      setBtn(selectedMasterForPlan.id, 'grantPlan', 'success');
+      autoReset(`gp_${selectedMasterForPlan.id}`, selectedMasterForPlan.id, 'grantPlan');
+      setShowPlanModal(false);
+    } catch (err) {
+      console.error('❌ Ошибка выдачи плана:', err);
+      setBtn(selectedMasterForPlan.id, 'grantPlan', 'error');
+      autoReset(`gp_${selectedMasterForPlan.id}`, selectedMasterForPlan.id, 'grantPlan');
+    }
+  };
+
   // ─── 1. Продлить Premium +30 дней ──────────────────────────
   const handleExtend = async (master: MasterRow) => {
     if (rowStates[master.id]?.extend === 'loading') return;
@@ -291,11 +341,17 @@ export default function AdminPage() {
 
       const { error } = await supabase
         .from('profiles')
-        .update({ is_premium: true, premium_expires_at: newExpiry.toISOString() })
+        .update({
+          is_premium: true,
+          premium_expires_at: newExpiry.toISOString(),
+        })
         .eq('id', master.id);
       if (error) throw error;
 
-      patchMaster(master.id, { is_premium: true, premium_expires_at: newExpiry.toISOString() });
+      patchMaster(master.id, {
+        is_premium: true,
+        premium_expires_at: newExpiry.toISOString(),
+      });
       setBtn(master.id, 'extend', 'success');
       autoReset(`ext_${master.id}`, master.id, 'extend');
     } catch {
@@ -304,7 +360,7 @@ export default function AdminPage() {
     }
   };
 
-  // ─── 2. Снять Premium (двойное подтверждение) ──────────────
+  // ─── 2. Снять Premium ───────────────────────────────────────
   const handleRevoke = async (master: MasterRow) => {
     const state = rowStates[master.id]?.revoke;
     if (state === 'loading') return;
@@ -319,11 +375,19 @@ export default function AdminPage() {
     try {
       const { error } = await supabase
         .from('profiles')
-        .update({ is_premium: false, premium_expires_at: null })
+        .update({
+          is_premium: false,
+          premium_expires_at: null,
+          plan_type: null,
+        })
         .eq('id', master.id);
       if (error) throw error;
 
-      patchMaster(master.id, { is_premium: false, premium_expires_at: null });
+      patchMaster(master.id, {
+        is_premium: false,
+        premium_expires_at: null,
+        plan_type: null,
+      });
       setBtn(master.id, 'revoke', 'success');
       autoReset(`rev_${master.id}`, master.id, 'revoke');
     } catch {
@@ -353,7 +417,7 @@ export default function AdminPage() {
     }
   };
 
-  // ─── 4. Сбросить триал (−15 дней) ──────────────────────────
+  // ─── 4. Сбросить триал ──────────────────────────────────────
   const handleResetTrial = async (master: MasterRow) => {
     if (rowStates[master.id]?.resetTrial === 'loading') return;
     setBtn(master.id, 'resetTrial', 'loading');
@@ -375,7 +439,7 @@ export default function AdminPage() {
     }
   };
 
-  // ─── 5. Удалить профиль (двойное подтверждение) ─────────────
+  // ─── 5. Удалить профиль ─────────────────────────────────────
   const handleDelete = async (master: MasterRow) => {
     const state = rowStates[master.id]?.delete;
     if (state === 'loading') return;
@@ -505,9 +569,7 @@ export default function AdminPage() {
           </p>
         </div>
 
-        {/* ══════════════════════════════════════ */}
-        {/* БЛОК А: Аналитика                     */}
-        {/* ══════════════════════════════════════ */}
+        {/* АНАЛИТИКА */}
         <section>
           <SectionTitle icon={<TrendingUp size={18} className="text-emerald-400" />}>
             Блок А — Бизнес-аналитика
@@ -548,20 +610,15 @@ export default function AdminPage() {
           )}
         </section>
 
-        {/* ══════════════════════════════════════ */}
-        {/* БЛОК Б: Рассылка                      */}
-        {/* ══════════════════════════════════════ */}
+        {/* РАССЫЛКА */}
         <section>
           <SectionTitle icon={<Send size={18} className="text-blue-400" />}>
-            Блок Б — Массовая рассылка через бота
+            Блок Б — Массовая рассылка
           </SectionTitle>
 
           <div className="bg-gray-900 rounded-2xl border border-white/8 p-6 space-y-4">
             <p className="text-sm text-gray-400">
-              Сообщение получат все мастера, у которых привязан Telegram. Отправка через{' '}
-              <code className="text-emerald-400 bg-emerald-400/10 px-1.5 py-0.5 rounded text-xs">
-                /api/broadcast
-              </code>
+              Сообщение получат все мастера с привязанным Telegram.
             </p>
             <div>
               <label className="text-sm font-medium text-gray-300 block mb-2">
@@ -570,9 +627,9 @@ export default function AdminPage() {
               <textarea
                 value={broadcastText}
                 onChange={(e) => setBroadcastText(e.target.value)}
-                placeholder="Введите текст для всех мастеров платформы..."
+                placeholder="Введите текст для всех мастеров..."
                 rows={4}
-                className="w-full bg-gray-800 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 text-sm resize-none focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                className="w-full bg-gray-800 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 text-sm resize-none focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
               />
               <p className="text-xs text-gray-600 mt-1">{broadcastText.length} символов</p>
             </div>
@@ -594,11 +651,7 @@ export default function AdminPage() {
 
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <p className="text-xs text-gray-500">
-                Telegram привязан у{' '}
-                <span className="text-white font-semibold">
-                  {masters.filter((m) => m.telegram_id?.trim() || m.telegram_chat_id?.trim()).length}
-                </span>{' '}
-                из <span className="text-white font-semibold">{masters.length}</span> мастеров
+                Telegram: {masters.filter((m) => m.telegram_id?.trim() || m.telegram_chat_id?.trim()).length} / {masters.length}
               </p>
               <button
                 onClick={handleBroadcast}
@@ -614,9 +667,7 @@ export default function AdminPage() {
           </div>
         </section>
 
-        {/* ══════════════════════════════════════ */}
-        {/* БЛОК В: Таблица мастеров              */}
-        {/* ══════════════════════════════════════ */}
+        {/* ТАБЛИЦА МАСТЕРОВ */}
         <section className="pb-12">
           <div className="flex items-center justify-between mb-4">
             <SectionTitle icon={<Crown size={18} className="text-amber-400" />}>
@@ -639,7 +690,7 @@ export default function AdminPage() {
               </div>
             ) : (
               <>
-                {/* ══════════ DESKTOP TABLE ══════════ */}
+                {/* DESKTOP TABLE */}
                 <div className="hidden lg:block overflow-x-auto">
                   <table className="w-full">
                     <thead>
@@ -724,13 +775,26 @@ export default function AdminPage() {
                               </div>
                             </td>
 
-                            {/* ══ ДЕЙСТВИЯ ══ */}
+                            {/* ДЕЙСТВИЯ */}
                             <td className="px-4 pr-6 py-4">
                               <div className="flex flex-col gap-1.5">
 
-                                {/* Ряд 1: Premium-действия */}
+                                {/* ★ НОВОЕ — выдать план */}
                                 <div className="flex flex-wrap gap-1.5">
-                                  {/* Продлить Premium +30д */}
+                                  <ActionBtn
+                                    btnState={states.grantPlan}
+                                    onClick={() => handleGrantPlanClick(master)}
+                                    idleClass="bg-purple-500/10 text-purple-400 border-purple-500/20 hover:bg-purple-500/20"
+                                    idleContent={
+                                      <><Award size={11} className="shrink-0" /><span>Выдать план</span></>
+                                    }
+                                    successClass="bg-purple-500/10 text-purple-400 border-purple-500/20"
+                                    title="Выдать тариф Соло/Салон на 30 дней"
+                                  />
+                                </div>
+
+                                {/* Premium-действия */}
+                                <div className="flex flex-wrap gap-1.5">
                                   <ActionBtn
                                     btnState={states.extend}
                                     onClick={() => handleExtend(master)}
@@ -738,14 +802,10 @@ export default function AdminPage() {
                                     idleContent={
                                       <><Star size={11} className="shrink-0" /><span>+30 дн.</span></>
                                     }
-                                    successContent={
-                                      <><CheckCircle size={11} className="shrink-0" /><span>Продлён!</span></>
-                                    }
                                     successClass="bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                                    title="Продлить Premium на 30 дней"
+                                    title="Продлить на 30 дней"
                                   />
 
-                                  {/* Снять Premium — только если is_premium */}
                                   <ActionBtn
                                     btnState={states.revoke}
                                     onClick={() => handleRevoke(master)}
@@ -758,65 +818,50 @@ export default function AdminPage() {
                                       <><AlertCircle size={11} className="shrink-0" /><span>Уверен?</span></>
                                     }
                                     confirmClass="bg-red-600/40 text-red-300 border-red-500/50 animate-pulse"
-                                    successContent={
-                                      <><CheckCircle size={11} className="shrink-0" /><span>Снят</span></>
-                                    }
                                     successClass="bg-gray-500/10 text-gray-400 border-gray-500/20"
-                                    title="Снять Premium (двойное подтверждение)"
+                                    title="Снять Premium"
                                   />
                                 </div>
 
-                                {/* Ряд 2: Триал-действия */}
+                                {/* Триал */}
                                 <div className="flex flex-wrap gap-1.5">
-                                  {/* +14 дней триала */}
                                   <ActionBtn
                                     btnState={states.grantTrial}
                                     onClick={() => handleGrantTrial(master)}
                                     idleClass="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20"
                                     idleContent={
-                                      <><Gift size={11} className="shrink-0" /><span>+14д триал</span></>
-                                    }
-                                    successContent={
-                                      <><CheckCircle size={11} className="shrink-0" /><span>Выдан</span></>
+                                      <><Gift size={11} className="shrink-0" /><span>+14д</span></>
                                     }
                                     successClass="bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                                    title="Дать +14 дней триала"
+                                    title="+14 дней триала"
                                   />
 
-                                  {/* Сбросить триал */}
                                   <ActionBtn
                                     btnState={states.resetTrial}
                                     onClick={() => handleResetTrial(master)}
                                     idleClass="bg-orange-500/10 text-orange-400 border-orange-500/20 hover:bg-orange-500/20"
                                     idleContent={
-                                      <><RotateCcw size={11} className="shrink-0" /><span>Сбр.триал</span></>
-                                    }
-                                    successContent={
-                                      <><CheckCircle size={11} className="shrink-0" /><span>Сброшен</span></>
+                                      <><RotateCcw size={11} className="shrink-0" /><span>Сбр.</span></>
                                     }
                                     successClass="bg-orange-500/10 text-orange-400 border-orange-500/20"
-                                    title="Сбросить триал (поставить −15 дней)"
+                                    title="Сбросить триал"
                                   />
                                 </div>
 
-                                {/* Ряд 3: Удалить профиль */}
+                                {/* Удалить */}
                                 <div>
                                   <ActionBtn
                                     btnState={states.delete}
                                     onClick={() => handleDelete(master)}
-                                    idleClass="bg-gray-800 text-gray-500 border-gray-700 hover:bg-red-900/20 hover:text-red-400 hover:border-red-500/30"
+                                    idleClass="bg-gray-800 text-gray-500 border-gray-700 hover:bg-red-900/20 hover:text-red-400"
                                     idleContent={
-                                      <><Trash2 size={11} className="shrink-0" /><span>Удалить профиль</span></>
+                                      <><Trash2 size={11} className="shrink-0" /><span>Удалить</span></>
                                     }
                                     confirmContent={
-                                      <><AlertCircle size={11} className="shrink-0" /><span>Точно удалить?</span></>
+                                      <><AlertCircle size={11} className="shrink-0" /><span>Точно?</span></>
                                     }
                                     confirmClass="bg-red-600/30 text-red-300 border-red-500/40 animate-pulse"
-                                    successContent={
-                                      <span>Удалён</span>
-                                    }
-                                    successClass="bg-gray-800 text-gray-600 border-gray-700"
-                                    title="Удалить профиль (двойное подтверждение)"
+                                    title="Удалить профиль"
                                   />
                                 </div>
 
@@ -830,7 +875,7 @@ export default function AdminPage() {
                   </table>
                 </div>
 
-                {/* ══════════ MOBILE CARDS ══════════ */}
+                {/* MOBILE CARDS */}
                 <div className="lg:hidden divide-y divide-white/5">
                   {masters.map((master) => {
                     const sub = getSubStatus(master);
@@ -839,7 +884,6 @@ export default function AdminPage() {
 
                     return (
                       <div key={master.id} className="p-4 space-y-3">
-                        {/* Шапка карточки */}
                         <div className="flex items-start gap-3">
                           <div className="w-10 h-10 bg-emerald-700 rounded-full flex items-center justify-center font-bold text-sm shrink-0">
                             {master.name?.charAt(0)?.toUpperCase() || '?'}
@@ -854,20 +898,25 @@ export default function AdminPage() {
                           </div>
                         </div>
 
-                        {/* Мета */}
                         <div className="flex items-center gap-3 text-xs text-gray-500">
                           <span>{hasTg ? '🟢 Telegram' : '⚪ Нет TG'}</span>
                           <span>·</span>
                           <span>{new Date(master.created_at).toLocaleDateString('ru-RU')}</span>
                         </div>
 
-                        {/* Кнопки */}
                         <div className="flex flex-wrap gap-1.5">
+                          <ActionBtn
+                            btnState={states.grantPlan}
+                            onClick={() => handleGrantPlanClick(master)}
+                            idleClass="bg-purple-500/10 text-purple-400 border-purple-500/20"
+                            idleContent={<><Award size={11} /><span>Выдать</span></>}
+                            successClass="bg-purple-500/10 text-purple-400 border-purple-500/20"
+                          />
                           <ActionBtn
                             btnState={states.extend}
                             onClick={() => handleExtend(master)}
                             idleClass="bg-amber-500/10 text-amber-400 border-amber-500/20"
-                            idleContent={<><Star size={11} /><span>+30 дн.</span></>}
+                            idleContent={<><Star size={11} /><span>+30</span></>}
                             successClass="bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                           />
                           <ActionBtn
@@ -888,20 +937,12 @@ export default function AdminPage() {
                             successClass="bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                           />
                           <ActionBtn
-                            btnState={states.resetTrial}
-                            onClick={() => handleResetTrial(master)}
-                            idleClass="bg-orange-500/10 text-orange-400 border-orange-500/20"
-                            idleContent={<><RotateCcw size={11} /><span>Сбр.триал</span></>}
-                            successClass="bg-orange-500/10 text-orange-400 border-orange-500/20"
-                          />
-                          <ActionBtn
                             btnState={states.delete}
                             onClick={() => handleDelete(master)}
                             idleClass="bg-gray-800 text-gray-500 border-gray-700"
                             idleContent={<><Trash2 size={11} /><span>Удалить</span></>}
                             confirmContent={<><AlertCircle size={11} /><span>Точно?</span></>}
                             confirmClass="bg-red-600/30 text-red-300 border-red-500/40 animate-pulse"
-                            successClass="bg-gray-800 text-gray-600 border-gray-700"
                           />
                         </div>
                       </div>
@@ -913,6 +954,71 @@ export default function AdminPage() {
           </div>
         </section>
       </main>
+
+      {/* ★ МОДАЛКА ВЫБОРА ПЛАНА */}
+      {showPlanModal && selectedMasterForPlan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+          <div className="bg-gray-900 rounded-3xl border border-white/10 p-8 max-w-md w-full shadow-2xl">
+            <h2 className="text-xl font-bold mb-2">Выдать подписку</h2>
+            <p className="text-sm text-gray-400 mb-6">
+              Мастер: <span className="text-white font-semibold">{selectedMasterForPlan.name}</span>
+            </p>
+
+            <div className="space-y-3 mb-6">
+              <label className="text-sm font-medium text-gray-300 block">
+                Выберите тариф:
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                {(['solo', 'salon'] as const).map((plan) => (
+                  <button
+                    key={plan}
+                    onClick={() => setSelectedPlanType(plan)}
+                    className={`flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all cursor-pointer ${
+                      selectedPlanType === plan
+                        ? 'border-emerald-500 bg-emerald-500/10'
+                        : 'border-white/10 bg-white/5 hover:bg-white/10'
+                    }`}
+                  >
+                    <span className="text-2xl">{plan === 'solo' ? '🌿' : '💎'}</span>
+                    <span className="font-bold text-sm">{plan === 'solo' ? 'Соло' : 'Салон'}</span>
+                    <span className="text-xs text-gray-400">{plan === 'solo' ? '550 ₽' : '990 ₽'}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-emerald-950/30 border border-emerald-700/30 rounded-2xl p-4 mb-6">
+              <p className="text-sm text-emerald-300">
+                <strong>✅ Будет выдано:</strong>
+              </p>
+              <ul className="text-xs text-emerald-400 mt-2 space-y-1 list-disc list-inside">
+                <li>Тариф: <strong>{selectedPlanType === 'solo' ? 'Соло' : 'Салон'}</strong></li>
+                <li>Срок: <strong>30 дней</strong> (до {new Date(new Date().setDate(new Date().getDate() + 30)).toLocaleDateString('ru-RU')})</li>
+                <li>Статус: <strong>Premium активен</strong></li>
+              </ul>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowPlanModal(false);
+                  setSelectedMasterForPlan(null);
+                }}
+                className="flex-1 py-3 rounded-xl bg-gray-800 hover:bg-gray-700 text-white font-semibold transition-all cursor-pointer"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handleGrantPlanConfirm}
+                className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                <Award size={16} />
+                Выдать план
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

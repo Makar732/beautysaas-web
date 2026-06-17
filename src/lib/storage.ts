@@ -1,7 +1,6 @@
 import { supabase } from './supabase';
 import { Master, Service, Booking, AppUser } from '../types';
 
-
 const KEYS = {
   USER: 'beauty_saas_user',
 };
@@ -59,8 +58,7 @@ export async function getMasterById(id: string): Promise<Master | null> {
 
 /**
  * Нормализует сырые данные из Supabase в объект Master.
- * Supabase хранит working_hours/days_off в snake_case,
- * а приложение использует camelCase.
+ * ★ ОБНОВЛЕНО: добавлены plan_type и premium_expires_at
  */
 function normalizeMaster(data: any): Master {
   return {
@@ -73,12 +71,20 @@ function normalizeMaster(data: any): Master {
     telegram_id: data.telegram_id || '',
     trial_start_date: data.trial_start_date || new Date().toISOString(),
     is_premium: data.is_premium || false,
+
+    // ★ НОВОЕ
+    plan_type: data.plan_type || null,
+    premium_expires_at: data.premium_expires_at || null,
+
     workingHours: data.working_hours || { start: '09:00', end: '21:00' },
     daysOff: data.days_off || [],
     created_at: data.created_at,
   };
 }
 
+/**
+ * ★ ОБНОВЛЕНО: сохраняет plan_type и premium_expires_at
+ */
 export async function upsertMaster(master: Master): Promise<void> {
   const dbMaster = {
     id: master.id,
@@ -90,6 +96,11 @@ export async function upsertMaster(master: Master): Promise<void> {
     telegram_id: master.telegram_id || '',
     trial_start_date: master.trial_start_date || new Date().toISOString(),
     is_premium: master.is_premium || false,
+
+    // ★ НОВОЕ
+    plan_type: master.plan_type || null,
+    premium_expires_at: master.premium_expires_at || null,
+
     working_hours: master.workingHours || { start: '09:00', end: '21:00' },
     days_off: master.daysOff || [],
     created_at: master.created_at,
@@ -189,10 +200,6 @@ export async function deleteBooking(id: string): Promise<void> {
   if (error) console.error('Ошибка удаления записи:', error);
 }
 
-/**
- * Считает количество записей мастера за текущий месяц (не отменённых).
- * Используется для проверки лимита 30 записей на бесплатном тарифе.
- */
 export async function getMonthBookingsCount(masterId: string): Promise<number> {
   const now = new Date();
   const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -212,13 +219,7 @@ export async function getMonthBookingsCount(masterId: string): Promise<number> {
   return data?.length ?? 0;
 }
 
-// ---- DEV TOOLS (только для разработки, удалить перед релизом) ----
-
-/**
- * Переключает is_premium для мастера на противоположное значение.
- * @param masterId - ID мастера
- * @param currentValue - текущее значение is_premium
- */
+// ---- DEV TOOLS ----
 export async function devTogglePremium(
   masterId: string,
   currentValue: boolean
@@ -236,11 +237,6 @@ export async function devTogglePremium(
   console.log(`✅ [DEV] is_premium → ${newValue}`);
 }
 
-/**
- * Устанавливает trial_start_date на 15 дней назад,
- * имитируя истечение триала.
- * @param masterId - ID мастера
- */
 export async function devExpireTrial(masterId: string): Promise<void> {
   const expiredDate = new Date();
   expiredDate.setDate(expiredDate.getDate() - 15);
@@ -254,13 +250,9 @@ export async function devExpireTrial(masterId: string): Promise<void> {
     console.error('❌ [DEV] Ошибка имитации истечения триала:', error);
     throw error;
   }
-  console.log(`✅ [DEV] trial_start_date → ${expiredDate.toISOString()} (15 дней назад)`);
+  console.log(`✅ [DEV] trial_start_date → ${expiredDate.toISOString()}`);
 }
 
-/**
- * Сбрасывает trial_start_date на текущий момент (сброс триала).
- * @param masterId - ID мастера
- */
 export async function devResetTrial(masterId: string): Promise<void> {
   const { error } = await supabase
     .from('profiles')
@@ -271,5 +263,5 @@ export async function devResetTrial(masterId: string): Promise<void> {
     console.error('❌ [DEV] Ошибка сброса триала:', error);
     throw error;
   }
-  console.log('✅ [DEV] trial_start_date сброшен на сейчас');
+  console.log('✅ [DEV] trial_start_date сброшен');
 }
