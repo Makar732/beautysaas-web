@@ -18,14 +18,24 @@ import {
 } from '../lib/storage';
 import { generateSlug } from '../lib/transliterate';
 
+// ─────────────────────────────────────────────────────────────
+// ТИПЫ
+// ─────────────────────────────────────────────────────────────
 interface AuthContextType {
   user: AppUser | null;
   isAuthenticated: boolean;
   needsOnboarding: boolean;
   isLoading: boolean;
+
+  // Подписка
   isPremium: boolean;
   isTrialActive: boolean;
   trialDaysLeft: number;
+  planType: 'solo' | 'salon';           // ★ НОВОЕ
+  premiumDaysLeft: number;              // ★ НОВОЕ
+  premiumExpiresAt: string | null;      // ★ НОВОЕ
+
+  // Методы
   loginWithEmail: (email: string, password: string) => Promise<{ error: string | null }>;
   registerWithEmail: (email: string, password: string) => Promise<{ error: string | null }>;
   completeOnboarding: (name: string, phone: string) => Promise<void>;
@@ -33,7 +43,15 @@ interface AuthContextType {
   updateUser: (updates: Partial<AppUser>) => Promise<void>;
 }
 
-function checkTrial(trialStartDate?: string): { isActive: boolean; daysLeft: number } {
+// ─────────────────────────────────────────────────────────────
+// ХЕЛПЕРЫ
+// ─────────────────────────────────────────────────────────────
+
+/** Считает дни триала */
+function checkTrial(trialStartDate?: string): {
+  isActive: boolean;
+  daysLeft: number;
+} {
   if (!trialStartDate) return { isActive: true, daysLeft: 14 };
   const start = new Date(trialStartDate);
   const now = new Date();
@@ -44,6 +62,23 @@ function checkTrial(trialStartDate?: string): { isActive: boolean; daysLeft: num
   return { isActive: daysLeft > 0, daysLeft };
 }
 
+/** Считает дни до окончания PRO-подписки */
+function checkPremiumExpiry(premiumExpiresAt?: string | null): {
+  daysLeft: number;
+} {
+  if (!premiumExpiresAt) return { daysLeft: 0 };
+  const target = new Date(premiumExpiresAt);
+  const now = new Date();
+  target.setHours(0, 0, 0, 0);
+  now.setHours(0, 0, 0, 0);
+  const days = Math.max(
+    0,
+    Math.round((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+  );
+  return { daysLeft: days };
+}
+
+/** Проверяет полноту профиля */
 function isProfileComplete(master: {
   name?: string | null;
   phone?: string | null;
@@ -56,47 +91,48 @@ function isProfileComplete(master: {
   return hasName && hasPhone;
 }
 
+// ─────────────────────────────────────────────────────────────
+// КОНТЕКСТ
+// ─────────────────────────────────────────────────────────────
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
-  // ✅ isLoading начинает как true — редиректы заблокированы до завершения
-  // проверки профиля в Supabase
   const [isLoading, setIsLoading] = useState(true);
 
-  // ─── После успешного входа проверяем профиль в БД ───────────────────────
-  // ВАЖНО: setIsLoading(false) вызывается ТОЛЬКО здесь, после того как
-  // запрос к public.profiles завершился (успешно или с ошибкой).
-  // Это предотвращает бесконечный редирект на /onboarding при перезагрузке.
+  // ── После успешного входа ──────────────────────────────────
   const handleSignedIn = useCallback(
     async (authUserId: string, authUserEmail: string) => {
       try {
         const profile = await getMasterById(authUserId);
 
         if (profile && isProfileComplete(profile)) {
-          // ✅ Профиль полный — пускаем в dashboard
           const appUser: AppUser = {
             id: profile.id,
             name: profile.name!,
             phone: profile.phone!,
             slug: profile.slug,
             isGuest: false,
-            telegram_chat_id: profile.telegram_chat_id || '',
+            telegram_chat_id:   profile.telegram_chat_id   || '',
             telegram_bot_token: profile.telegram_bot_token || '',
-            telegram_id: profile.telegram_id || '',
-            trial_start_date: profile.trial_start_date,
-            is_premium: profile.is_premium || false,
+            telegram_id:        profile.telegram_id        || '',
+            trial_start_date:   profile.trial_start_date,
+            is_premium:         profile.is_premium || false,
+
+            // ★ НОВОЕ
+            plan_type:           profile.plan_type           || 'solo',
+            premium_expires_at:  profile.premium_expires_at  ?? null,
+
             workingHours: profile.workingHours || { start: '09:00', end: '21:00' },
-            daysOff: profile.daysOff || [],
+            daysOff:      profile.daysOff      || [],
           };
 
           saveUser(appUser);
           setUser(appUser);
           setNeedsOnboarding(false);
         } else {
-          // ✅ Профиля нет или не заполнен — отправляем на онбординг
-          sessionStorage.setItem('pending_user_id', authUserId);
+          sessionStorage.setItem('pending_user_id',    authUserId);
           sessionStorage.setItem('pending_user_email', authUserEmail);
           setUser(null);
           setNeedsOnboarding(true);
@@ -106,31 +142,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
         setNeedsOnboarding(true);
       } finally {
-        // ✅ Загрузка завершена ТОЛЬКО после ответа от profiles
         setIsLoading(false);
       }
     },
     []
   );
 
-  // ─── Инициализация ───────────────────────────────────────────────────────
+  // ── Инициализация ──────────────────────────────────────────
   useEffect(() => {
     initStorage();
 
-    // Локальный кэш для мгновенного первого рендера (не влияет на isLoading)
     const savedUser = getUser();
     if (savedUser && isProfileComplete(savedUser)) {
       setUser(savedUser);
       setNeedsOnboarding(false);
     }
 
-    // Проверяем реальную сессию Supabase
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
-        // handleSignedIn сам вызовет setIsLoading(false) в finally
         await handleSignedIn(session.user.id, session.user.email || '');
       } else {
-        // Нет сессии — сразу снимаем загрузку
         clearUser();
         setUser(null);
         setNeedsOnboarding(false);
@@ -138,31 +169,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    // Слушаем изменения сессии
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (
-        (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') &&
-        session?.user
-      ) {
-        // handleSignedIn сам вызовет setIsLoading(false) в finally
-        await handleSignedIn(session.user.id, session.user.email || '');
-      }
-
-      if (event === 'SIGNED_OUT') {
-        clearUser();
-        sessionStorage.clear();
-        setUser(null);
-        setNeedsOnboarding(false);
-        setIsLoading(false);
-      }
-    });
+    const { data: { subscription } } =
+      supabase.auth.onAuthStateChange(async (event, session) => {
+        if (
+          (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') &&
+          session?.user
+        ) {
+          await handleSignedIn(session.user.id, session.user.email || '');
+        }
+        if (event === 'SIGNED_OUT') {
+          clearUser();
+          sessionStorage.clear();
+          setUser(null);
+          setNeedsOnboarding(false);
+          setIsLoading(false);
+        }
+      });
 
     return () => subscription.unsubscribe();
   }, [handleSignedIn]);
 
-  // ─── Вход по email + пароль ──────────────────────────────────────────────
+  // ── Вход ──────────────────────────────────────────────────
   const loginWithEmail = async (
     email: string,
     password: string
@@ -171,57 +198,65 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error ? error.message : null };
   };
 
-  // ─── Регистрация по email + пароль ──────────────────────────────────────
+  // ── Регистрация ────────────────────────────────────────────
   const registerWithEmail = async (
     email: string,
     password: string
   ): Promise<{ error: string | null }> => {
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) return { error: error.message };
-
     if (data.user) {
-      sessionStorage.setItem('pending_user_id', data.user.id);
+      sessionStorage.setItem('pending_user_id',    data.user.id);
       sessionStorage.setItem('pending_user_email', email);
     }
-
     return { error: null };
   };
 
-  // ─── Завершение онбординга ───────────────────────────────────────────────
-  const completeOnboarding = async (name: string, phone: string): Promise<void> => {
+  // ── Онбординг ─────────────────────────────────────────────
+  const completeOnboarding = async (
+    name: string,
+    phone: string
+  ): Promise<void> => {
     const userId =
       sessionStorage.getItem('pending_user_id') || `master-${Date.now()}`;
-    const slug = generateSlug(name);
+    const slug           = generateSlug(name);
     const trialStartDate = new Date().toISOString();
 
     const newUser: AppUser = {
-      id: userId,
-      name: name.trim(),
+      id:    userId,
+      name:  name.trim(),
       phone: phone.trim(),
       slug,
-      isGuest: false,
-      telegram_chat_id: '',
+      isGuest:            false,
+      telegram_chat_id:   '',
       telegram_bot_token: '',
-      telegram_id: '',
-      trial_start_date: trialStartDate,
-      is_premium: false,
+      telegram_id:        '',
+      trial_start_date:   trialStartDate,
+      is_premium:         false,
+
+      // ★ НОВОЕ — новый пользователь по умолчанию solo
+      plan_type:          'solo',
+      premium_expires_at: null,
+
       workingHours: { start: '09:00', end: '21:00' },
-      daysOff: [],
+      daysOff:      [],
     };
 
     await upsertMaster({
-      id: newUser.id,
-      name: newUser.name,
-      slug: newUser.slug,
-      phone: newUser.phone,
-      telegram_chat_id: '',
-      telegram_bot_token: '',
-      telegram_id: '',
-      trial_start_date: trialStartDate,
-      is_premium: false,
-      working_hours: newUser.workingHours,
-      days_off: newUser.daysOff,
-      created_at: new Date().toISOString(),
+      id:                newUser.id,
+      name:              newUser.name,
+      slug:              newUser.slug,
+      phone:             newUser.phone,
+      telegram_chat_id:  '',
+      telegram_bot_token:'',
+      telegram_id:       '',
+      trial_start_date:  trialStartDate,
+      is_premium:        false,
+      plan_type:         'solo',
+      premium_expires_at: null,
+      working_hours:     newUser.workingHours,
+      days_off:          newUser.daysOff,
+      created_at:        new Date().toISOString(),
     } as any);
 
     saveUser(newUser);
@@ -232,7 +267,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     sessionStorage.removeItem('pending_user_email');
   };
 
-  // ─── Выход ───────────────────────────────────────────────────────────────
+  // ── Выход ─────────────────────────────────────────────────
   const logout = async (): Promise<void> => {
     await supabase.auth.signOut();
     clearUser();
@@ -242,35 +277,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
   };
 
-  // ─── Обновление данных пользователя ─────────────────────────────────────
+  // ── Обновление пользователя ───────────────────────────────
   const updateUser = async (updates: Partial<AppUser>): Promise<void> => {
     if (!user) return;
     const updated: AppUser = { ...user, ...updates };
     await upsertMaster({
       ...updated,
       working_hours: updated.workingHours,
-      days_off: updated.daysOff,
-      created_at: new Date().toISOString(),
+      days_off:      updated.daysOff,
+      created_at:    new Date().toISOString(),
     } as any);
     saveUser(updated);
     setUser(updated);
   };
 
-  const { isActive: isTrialActive, daysLeft: trialDaysLeft } = checkTrial(
-    user?.trial_start_date
-  );
+  // ── Вычисляемые значения подписки ────────────────────────
+  const { isActive: isTrialActive, daysLeft: trialDaysLeft } =
+    checkTrial(user?.trial_start_date);
+
   const isPremium = user?.is_premium || false;
 
+  // ★ НОВОЕ
+  const planType          = user?.plan_type          || 'solo';
+  const premiumExpiresAt  = user?.premium_expires_at ?? null;
+  const { daysLeft: premiumDaysLeft } = checkPremiumExpiry(premiumExpiresAt);
+
+  // ─────────────────────────────────────────────────────────
   return (
     <AuthContext.Provider
       value={{
         user,
-        isAuthenticated: !!user && !needsOnboarding,
+        isAuthenticated:  !!user && !needsOnboarding,
         needsOnboarding,
         isLoading,
         isPremium,
         isTrialActive,
         trialDaysLeft,
+        planType,           // ★
+        premiumDaysLeft,    // ★
+        premiumExpiresAt,   // ★
         loginWithEmail,
         registerWithEmail,
         completeOnboarding,

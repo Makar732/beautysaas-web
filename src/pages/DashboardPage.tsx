@@ -100,43 +100,106 @@ function daysUntil(isoDate: string | null | undefined): number {
   return Math.round((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-// ─── Хелпер: статус подписки для отображения ───────────────
+// ─────────────────────────────────────────────────────────────
+// Хелпер: бейдж подписки с детальным счётчиком дней
+// ─────────────────────────────────────────────────────────────
 function getSubBadge(
   isPremium: boolean,
   isTrialActive: boolean,
   trialDaysLeft: number,
-  premiumExpiresAt?: string | null
-): { label: string; className: string } {
+  planType: 'solo' | 'salon',
+  premiumDaysLeft: number,
+): {
+  label: string;
+  sublabel: string | null;
+  className: string;
+  barPercent: number | null;
+  barColor: string;
+  icon: string;
+} {
+  // ── PRO активен ──────────────────────────────────────────
   if (isPremium) {
-    if (premiumExpiresAt) {
-      const days = daysUntil(premiumExpiresAt);
-      if (days > 0) {
-        return {
-          label: `⭐ PRO (${days} дн.)`,
-          className: 'bg-amber-500/20 text-amber-400',
-        };
-      }
+    const planLabel = planType === 'salon' ? 'Салон PRO' : 'Соло PRO';
+
+    if (premiumDaysLeft > 0) {
+      // Считаем % заполнения бара (из 30 дней)
+      const barPct = Math.min(100, Math.round((premiumDaysLeft / 30) * 100));
+      return {
+        label:      `⭐ ${planLabel}`,
+        sublabel:   `Осталось ${premiumDaysLeft} ${pluralDays(premiumDaysLeft)}`,
+        className:  'bg-amber-500/20 text-amber-300',
+        barPercent: barPct,
+        barColor:   'bg-amber-400',
+        icon:       '⭐',
+      };
     }
-    return { label: '⭐ PRO', className: 'bg-amber-500/20 text-amber-400' };
-  }
-  if (isTrialActive) {
+
+    // PRO без даты окончания (бессрочный)
     return {
-      label: `Триал: ${trialDaysLeft} дн.`,
-      className: 'bg-emerald-500/20 text-emerald-400',
+      label:      `⭐ ${planLabel}`,
+      sublabel:   'Активна',
+      className:  'bg-amber-500/20 text-amber-300',
+      barPercent: null,
+      barColor:   'bg-amber-400',
+      icon:       '⭐',
     };
   }
-  return { label: 'Бесплатный', className: 'bg-gray-500/20 text-gray-400' };
+
+  // ── Триал активен ─────────────────────────────────────────
+  if (isTrialActive) {
+    const barPct = Math.min(100, Math.round((trialDaysLeft / 14) * 100));
+    const isUrgent = trialDaysLeft <= 3;
+    return {
+      label:      `🎁 Пробный период`,
+      sublabel:   `Осталось ${trialDaysLeft} ${pluralDays(trialDaysLeft)}`,
+      className:  isUrgent
+        ? 'bg-red-500/20 text-red-400'
+        : 'bg-emerald-500/20 text-emerald-400',
+      barPercent: barPct,
+      barColor:   isUrgent ? 'bg-red-400' : 'bg-emerald-400',
+      icon:       '🎁',
+    };
+  }
+
+  // ── Бесплатный (триал истёк) ──────────────────────────────
+  return {
+    label:      '🔒 Подписка истекла',
+    sublabel:   'Обновите тариф',
+    className:  'bg-gray-500/20 text-gray-400',
+    barPercent: 0,
+    barColor:   'bg-gray-600',
+    icon:       '🔒',
+  };
+}
+
+/** Склонение слова "день" */
+function pluralDays(n: number): string {
+  const abs = Math.abs(n);
+  if (abs % 100 >= 11 && abs % 100 <= 14) return 'дней';
+  switch (abs % 10) {
+    case 1: return 'день';
+    case 2:
+    case 3:
+    case 4: return 'дня';
+    default: return 'дней';
+  }
 }
 
 export default function DashboardPage() {
-  const { user, logout, updateUser, isPremium, isTrialActive, trialDaysLeft } = useAuth();
+  const {
+    user,
+    logout,
+    updateUser,
+    isPremium,
+    isTrialActive,
+    trialDaysLeft,
+    planType,
+    premiumDaysLeft,
+    premiumExpiresAt,
+  } = useAuth();
   const navigate = useNavigate();
 
   const isAdmin = user?.id === ADMIN_UUID;
-
-  // Получаем premium_expires_at из user (добавим в AppUser позже если нужно)
-  // Пока берём из user напрямую если поле есть
-  const premiumExpiresAt = (user as any)?.premium_expires_at as string | null | undefined;
 
   const [activeTab, setActiveTab] = useState<Tab>('calendar');
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -417,7 +480,13 @@ export default function DashboardPage() {
   const visibleSlots = getVisibleSlots();
 
   // Бейдж подписки для Sidebar и Header
-  const subBadge = getSubBadge(isPremium, isTrialActive, trialDaysLeft, premiumExpiresAt);
+  const subBadge = getSubBadge(
+    isPremium,
+    isTrialActive,
+    trialDaysLeft,
+    planType,
+    premiumDaysLeft,
+  );
 
   if (!user) return null;
 
@@ -436,17 +505,67 @@ export default function DashboardPage() {
             </span>
           </div>
           <div className="bg-white/5 rounded-2xl p-3">
-            <div className="w-10 h-10 bg-emerald-700 rounded-full flex items-center justify-center text-lg font-bold mb-2">
-              {user.name.charAt(0).toUpperCase()}
+            {/* Аватар + имя */}
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-10 h-10 bg-emerald-700 rounded-full flex items-center justify-center text-lg font-bold shrink-0">
+                {user.name.charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <p className="font-semibold text-sm truncate leading-tight">
+                  {user.name}
+                </p>
+                <p className="text-xs text-gray-400 truncate">{user.phone}</p>
+              </div>
             </div>
-            <p className="font-semibold text-sm truncate">{user.name}</p>
-            <p className="text-xs text-gray-400 truncate">{user.phone}</p>
-            {/* ── Статус подписки с количеством дней ── */}
-            <span
-              className={`mt-2 inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${subBadge.className}`}
-            >
-              {subBadge.label}
-            </span>
+
+            {/* Бейдж подписки */}
+            <div className={`rounded-xl px-3 py-2 ${subBadge.className} bg-opacity-100`}>
+              {/* Строка: иконка + лейбл + тип плана */}
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-bold tracking-wide">
+                  {subBadge.label}
+                </span>
+                {planType && isPremium && (
+                  <span className="text-xs opacity-60 capitalize">
+                    {planType === 'salon' ? 'Салон' : 'Соло'}
+                  </span>
+                )}
+              </div>
+
+              {/* Подпись (дней осталось) */}
+              {subBadge.sublabel && (
+                <p className="text-xs opacity-75 mb-2 leading-tight">
+                  {subBadge.sublabel}
+                </p>
+              )}
+
+              {/* Прогресс-бар */}
+              {subBadge.barPercent !== null && (
+                <div className="w-full bg-black/20 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-700 ${subBadge.barColor}`}
+                    style={{ width: `${subBadge.barPercent}%` }}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* CTA: если триал заканчивается или истёк */}
+            {(!isPremium) && (
+              <a
+                href="https://t.me/beautysaas_support_bot"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`mt-2 flex items-center justify-center gap-1.5 w-full text-xs font-semibold px-3 py-2 rounded-xl transition-all ${
+                  isTrialActive && trialDaysLeft > 3
+                    ? 'bg-emerald-700/40 hover:bg-emerald-700/60 text-emerald-300'
+                    : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 animate-pulse'
+                }`}
+              >
+                <Star size={11} />
+                {isTrialActive ? 'Перейти на PRO' : 'Обновить тариф'}
+              </a>
+            )}
           </div>
         </div>
 
@@ -497,7 +616,14 @@ export default function DashboardPage() {
             <p className="font-bold text-emerald-400">
               {todayRevenue.toLocaleString('ru-RU')} ₽
             </p>
-            <p className="text-xs text-gray-500">{todayBookings.length} записей</p>
+            <p className="text-xs text-gray-500">
+              {todayBookings.length === 0
+                ? '🌿 Записей нет — день свободен'
+                : `${todayBookings.length} ${
+                    todayBookings.length === 1 ? 'запись' :
+                    todayBookings.length < 5 ? 'записи' : 'записей'
+                  }`}
+            </p>
           </div>
 
           {/* ══ DEV PANEL УДАЛЕНА ══ */}
@@ -574,11 +700,16 @@ export default function DashboardPage() {
             <span className="text-xs text-gray-300 font-medium truncate max-w-[140px]">
               {user.name}
             </span>
-            <span
-              className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full mt-0.5 font-semibold ${subBadge.className}`}
-            >
-              {subBadge.label}
-            </span>
+            <div className="flex items-center gap-1 mt-0.5">
+              <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-semibold ${subBadge.className}`}>
+                {subBadge.label}
+              </span>
+              {subBadge.sublabel && (
+                <span className="text-xs text-gray-500 hidden sm:block">
+                  · {subBadge.sublabel}
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Кнопка выхода */}
@@ -1041,7 +1172,10 @@ export default function DashboardPage() {
                             </button>
                           </div>
                           {dayBks.length === 0 ? (
-                            <p className="text-xs text-gray-400">Нет записей</p>
+                            <div className="flex items-center gap-2 py-1">
+                              <div className="w-1.5 h-1.5 rounded-full bg-gray-200" />
+                              <p className="text-xs text-gray-400">Свободно — нажмите, чтобы добавить</p>
+                            </div>
                           ) : (
                             <div className="space-y-1">
                               {dayBks.slice(0, 3).map((b) => (
@@ -1094,22 +1228,82 @@ export default function DashboardPage() {
               )}
 
               {services.length === 0 ? (
-                <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center">
-                  <Package size={48} className="text-gray-300 mx-auto mb-4" />
-                  <p className="text-gray-500 text-lg font-medium mb-2">Услуги не добавлены</p>
-                  <p className="text-gray-400 text-sm mb-6">
-                    Добавьте услуги, чтобы клиенты могли записаться
-                  </p>
-                  <Button
-                    variant="primary"
-                    onClick={() => {
-                      setEditingService(null);
-                      setServiceForm({ name: '', price: '', duration: '' });
-                      setShowEditServiceModal(true);
-                    }}
-                  >
-                    <Plus size={16} /> Добавить первую услугу
-                  </Button>
+                <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+                  {/* Верхняя полоса */}
+                  <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border-b border-emerald-100 px-8 py-6 flex items-center gap-4">
+                    <div className="w-14 h-14 bg-emerald-100 rounded-2xl flex items-center justify-center shrink-0">
+                      <Package size={28} className="text-emerald-600" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-gray-900 text-lg">
+                        Добавьте первую услугу
+                      </p>
+                      <p className="text-sm text-gray-500 mt-0.5">
+                        Без услуг клиенты не смогут записаться через вашу ссылку
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Шаги-подсказки */}
+                  <div className="px-8 py-6">
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
+                      Как это работает:
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+                      {[
+                        {
+                          step: '1',
+                          icon: '💅',
+                          title: 'Добавьте услугу',
+                          desc: 'Название, цену и длительность — займёт 30 секунд',
+                        },
+                        {
+                          step: '2',
+                          icon: '🔗',
+                          title: 'Поделитесь ссылкой',
+                          desc: 'Отправьте клиентам вашу персональную ссылку для записи',
+                        },
+                        {
+                          step: '3',
+                          icon: '📲',
+                          title: 'Получайте записи',
+                          desc: 'Клиенты записываются сами — вы получаете уведомление в Telegram',
+                        },
+                      ].map((item) => (
+                        <div
+                          key={item.step}
+                          className="bg-gray-50 rounded-2xl p-4 flex flex-col items-start gap-2 border border-gray-100"
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 bg-emerald-600 rounded-full flex items-center justify-center text-white text-xs font-black">
+                              {item.step}
+                            </div>
+                            <span className="text-xl">{item.icon}</span>
+                          </div>
+                          <p className="font-semibold text-gray-900 text-sm">{item.title}</p>
+                          <p className="text-xs text-gray-500 leading-relaxed">{item.desc}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <Button
+                      variant="primary"
+                      size="lg"
+                      onClick={() => {
+                        setEditingService(null);
+                        setServiceForm({ name: '', price: '', duration: '' });
+                        setShowEditServiceModal(true);
+                      }}
+                      className="w-full sm:w-auto"
+                    >
+                      <Plus size={18} />
+                      Добавить первую услугу
+                    </Button>
+
+                    <p className="text-xs text-gray-400 mt-3">
+                      Совет: начните с 2–3 популярных услуг — их всегда можно дополнить позже
+                    </p>
+                  </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1238,9 +1432,23 @@ export default function DashboardPage() {
                 <div className="bg-white rounded-2xl border border-gray-200 p-6">
                   <h3 className="font-bold text-gray-900 text-lg mb-4">Топ услуг</h3>
                   {serviceStats.length === 0 ? (
-                    <p className="text-gray-400 text-sm">
-                      Нет данных. Добавьте услуги и записи.
-                    </p>
+                    <div className="text-center py-8">
+                      <div className="text-4xl mb-3">📊</div>
+                      <p className="text-gray-600 font-medium mb-1">
+                        Данных пока нет
+                      </p>
+                      <p className="text-gray-400 text-sm leading-relaxed max-w-xs mx-auto">
+                        Статистика появится после первых подтверждённых записей.
+                        Добавьте услуги и поделитесь ссылкой с клиентами.
+                      </p>
+                      <button
+                        onClick={() => setActiveTab('services')}
+                        className="mt-4 inline-flex items-center gap-2 text-sm text-emerald-600 hover:text-emerald-500 font-medium transition-colors"
+                      >
+                        <Plus size={14} />
+                        Перейти к услугам
+                      </button>
+                    </div>
                   ) : (
                     <div className="space-y-3">
                       {serviceStats.map((s, i) => (

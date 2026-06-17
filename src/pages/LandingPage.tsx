@@ -500,66 +500,248 @@ export default function LandingPage() {
       </section>
 
       {/* ===== PRICING ===== */}
-      <section id="pricing" className="py-20 px-4">
-        <div className="max-w-2xl mx-auto text-center">
-          <h2 className="text-3xl sm:text-4xl font-bold mb-4">
-            Простой <span className="text-emerald-400">тариф</span>
-          </h2>
-          <p className="text-gray-400 text-lg mb-12">Без скрытых платежей и комиссий</p>
+<section id="pricing" className="py-20 px-4">
+  <div className="max-w-5xl mx-auto">
+    <div className="text-center mb-14">
+      <h2 className="text-3xl sm:text-4xl font-bold mb-4">
+        Выберите свой <span className="text-emerald-400">тариф</span>
+      </h2>
+      <p className="text-gray-400 text-lg">
+        14 дней бесплатно на любом тарифе — без привязки карты
+      </p>
+    </div>
 
-          <div className="bg-gradient-to-br from-emerald-900/40 to-gray-900 rounded-3xl border border-emerald-700/40 p-8 relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl" />
-            <div className="absolute top-4 right-4 bg-amber-400 text-gray-900 text-xs font-bold px-3 py-1 rounded-full">
-              Популярный
-            </div>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
 
-            <div className="relative">
-              <h3 className="text-2xl font-bold mb-2">Старт</h3>
-              <p className="text-gray-400 mb-6">Для соло-мастеров и микро-студий</p>
+      {/* ══════════════════════════════════════════
+          КАРТОЧКА 1: СОЛО
+      ══════════════════════════════════════════ */}
+      <div className="bg-gray-900 rounded-3xl border border-white/10 p-8 relative overflow-hidden flex flex-col">
+        {/* Фоновый блик */}
+        <div className="absolute top-0 right-0 w-40 h-40 bg-emerald-600/8 rounded-full blur-3xl pointer-events-none" />
 
-              {/* ── ИСПРАВЛЕНО: цена 990 ₽ вместо 1 490 ₽ ── */}
-              <div className="flex items-baseline gap-2 justify-center mb-2">
-                <span className="text-5xl font-black">990</span>
-                <div className="text-left">
-                  <span className="text-emerald-400 font-bold text-xl">₽</span>
-                  <p className="text-gray-400 text-sm">/мес</p>
-                </div>
-              </div>
-              <p className="text-gray-500 text-sm mb-8">14 дней бесплатно — без привязки карты</p>
+        {/* Заголовок */}
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-2xl">🌿</span>
+            <h3 className="text-2xl font-bold text-white">Соло</h3>
+          </div>
+          <p className="text-gray-400 text-sm leading-relaxed">
+            Для мастера, который работает сам на себя
+            и хочет освободить время от рутины
+          </p>
+        </div>
 
-              <div className="space-y-3 mb-8 text-left">
-                {[
-                  'Онлайн-запись 24/7 через персональную ссылку',
-  '1 активный мастер (для соло-специалиста)',        // ← ИСПРАВЛЕНО
-  'До 10 активных услуг в прайсе',
-  'Telegram-уведомления мастеру и клиентам',
-  'Аналитика выручки и загрузки',
-  'Управление расписанием и выходными днями',
-  'Поддержка через Telegram-бот',
-  'Все будущие обновления включены',
-                ].map((item) => (
-                  <div key={item} className="flex items-start gap-3">
-                    <CheckCircle size={16} className="text-emerald-400 mt-0.5 shrink-0" />
-                    <span className="text-sm text-gray-300">{item}</span>
-                  </div>
-                ))}
-              </div>
-
-              {/* Кнопка ведёт на страницу авторизации */}
-              <Button
-                variant="amber"
-                size="lg"
-                className="w-full"
-                onClick={() => navigate('/login')}
-              >
-                Начать бесплатно — 14 дней
-                <ArrowRight size={18} />
-              </Button>
-              <p className="text-xs text-gray-500 mt-3">Без привязки карты. Отмена в любой момент.</p>
-            </div>
+        {/* Цена */}
+        <div className="flex items-baseline gap-2 mb-2">
+          <span className="text-5xl font-black text-white">550</span>
+          <div className="text-left">
+            <span className="text-emerald-400 font-bold text-xl">₽</span>
+            <p className="text-gray-500 text-sm">/мес</p>
           </div>
         </div>
-      </section>
+        <p className="text-gray-600 text-sm mb-8">
+          или 5 500 ₽/год — 2 месяца в подарок
+        </p>
+
+        {/* Продающий слоган */}
+        <div className="bg-emerald-950/60 border border-emerald-800/40 rounded-2xl px-4 py-3 mb-8">
+          <p className="text-emerald-300 text-sm font-medium text-center italic">
+            «Твой личный секретарь в Telegram 24/7 —
+            клиенты записываются, пока ты отдыхаешь»
+          </p>
+        </div>
+
+        {/* Преимущества */}
+        <ul className="space-y-3 mb-10 flex-1">
+          {[
+            {
+              icon: '😌',
+              text: 'Забудь отвечать на «а можно в субботу?» — клиенты записываются сами',
+            },
+            {
+              icon: '🌙',
+              text: 'Записи приходят даже ночью и в выходные — ты отдыхаешь, бот работает',
+            },
+            {
+              icon: '📲',
+              text: 'Уведомление о каждой записи мгновенно в Telegram',
+            },
+            {
+              icon: '🗓️',
+              text: 'Твоё расписание всегда под контролем — никаких двойных записей',
+            },
+            {
+              icon: '💅',
+              text: 'До 10 услуг в прайсе с ценами и длительностью',
+            },
+            {
+              icon: '📊',
+              text: 'Аналитика выручки — знай, сколько ты зарабатываешь',
+            },
+            {
+              icon: '⚙️',
+              text: 'Настройка рабочих часов и выходных дней',
+            },
+          ].map((item) => (
+            <li key={item.text} className="flex items-start gap-3">
+              <span className="text-base shrink-0 mt-0.5">{item.icon}</span>
+              <span className="text-sm text-gray-300 leading-relaxed">
+                {item.text}
+              </span>
+            </li>
+          ))}
+        </ul>
+
+        {/* Кнопки */}
+        <div className="space-y-3">
+          <button
+            onClick={() => navigate('/login')}
+            className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-bold px-6 py-4 rounded-2xl transition-all text-sm shadow-lg shadow-emerald-900/30"
+          >
+            <span>🎁</span>
+            Попробовать 14 дней бесплатно
+          </button>
+          <button
+            onClick={() => navigate('/login')}
+            className="w-full flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 font-semibold px-6 py-3.5 rounded-2xl transition-all text-sm"
+          >
+            <span>💳</span>
+            Купить подписку — 550 ₽/мес
+          </button>
+        </div>
+
+        <p className="text-xs text-gray-600 text-center mt-4">
+          Без привязки карты. Отмена в любой момент.
+        </p>
+      </div>
+
+      {/* ══════════════════════════════════════════
+          КАРТОЧКА 2: САЛОН
+      ══════════════════════════════════════════ */}
+      <div className="bg-gradient-to-br from-amber-950/40 to-gray-900 rounded-3xl border border-amber-600/30 p-8 relative overflow-hidden flex flex-col shadow-2xl shadow-amber-900/10">
+        {/* Бейдж "Популярный" */}
+        <div className="absolute top-5 right-5 bg-amber-400 text-gray-900 text-xs font-black px-3 py-1.5 rounded-full shadow-lg">
+          ⭐ Популярный
+        </div>
+
+        {/* Фоновый блик */}
+        <div className="absolute top-0 right-0 w-48 h-48 bg-amber-500/8 rounded-full blur-3xl pointer-events-none" />
+
+        {/* Заголовок */}
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-2xl">💎</span>
+            <h3 className="text-2xl font-bold text-white">Салон</h3>
+          </div>
+          <p className="text-gray-400 text-sm leading-relaxed">
+            Для студий и салонов, которые хотят выглядеть
+            профессионально и расти системно
+          </p>
+        </div>
+
+        {/* Цена */}
+        <div className="flex items-baseline gap-2 mb-2">
+          <span className="text-5xl font-black text-white">990</span>
+          <div className="text-left">
+            <span className="text-amber-400 font-bold text-xl">₽</span>
+            <p className="text-gray-500 text-sm">/мес</p>
+          </div>
+        </div>
+        <p className="text-gray-600 text-sm mb-8">
+          или 9 900 ₽/год — 2 месяца в подарок
+        </p>
+
+        {/* Продающий слоган */}
+        <div className="bg-amber-950/50 border border-amber-700/40 rounded-2xl px-4 py-3 mb-8">
+          <p className="text-amber-300 text-sm font-medium text-center italic">
+            «Порядок в расписании всей команды —
+            ваш салон работает круглосуточно без администратора»
+          </p>
+        </div>
+
+        {/* Преимущества */}
+        <ul className="space-y-3 mb-10 flex-1">
+          {[
+            {
+              icon: '🏆',
+              text: 'Всё из тарифа Соло — плюс возможности для команды',
+            },
+            {
+              icon: '👥',
+              text: 'Несколько мастеров в одной системе — каждый со своим расписанием',
+            },
+            {
+              icon: '🕐',
+              text: 'Салон принимает записи круглосуточно — без администратора на телефоне',
+            },
+            {
+              icon: '💼',
+              text: 'Профессиональный имидж: клиент видит красивую страницу записи с вашим брендом',
+            },
+            {
+              icon: '📈',
+              text: 'Аналитика по каждому мастеру — видите кто приносит больше выручки',
+            },
+            {
+              icon: '🔔',
+              text: 'Авто-напоминания клиентам в Telegram — меньше отмен и «забыл»',
+            },
+            {
+              icon: '🛡️',
+              text: 'Приоритетная поддержка и ранний доступ к новым функциям',
+            },
+          ].map((item) => (
+            <li key={item.text} className="flex items-start gap-3">
+              <span className="text-base shrink-0 mt-0.5">{item.icon}</span>
+              <span className="text-sm text-gray-300 leading-relaxed">
+                {item.text}
+              </span>
+            </li>
+          ))}
+        </ul>
+
+        {/* Кнопки */}
+        <div className="space-y-3">
+          <button
+            onClick={() => navigate('/login')}
+            className="w-full flex items-center justify-center gap-2 bg-amber-400 hover:bg-amber-300 active:bg-amber-500 text-gray-900 font-black px-6 py-4 rounded-2xl transition-all text-sm shadow-lg shadow-amber-900/30"
+          >
+            <span>🎁</span>
+            Попробовать 14 дней бесплатно
+          </button>
+          <button
+            onClick={() => navigate('/login')}
+            className="w-full flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 font-semibold px-6 py-3.5 rounded-2xl transition-all text-sm"
+          >
+            <span>💳</span>
+            Купить подписку — 990 ₽/мес
+          </button>
+        </div>
+
+        <p className="text-xs text-gray-600 text-center mt-4">
+          Без привязки карты. Отмена в любой момент.
+        </p>
+      </div>
+
+    </div>
+
+    {/* Сравнительная строка снизу */}
+    <div className="mt-10 text-center">
+      <p className="text-gray-600 text-sm">
+        Не уверены какой тариф выбрать?{' '}
+        <a
+          href="https://t.me/beautysaas_support_bot"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-emerald-400 hover:text-emerald-300 transition-colors underline underline-offset-2"
+        >
+          Напишите нам — поможем выбрать
+        </a>
+      </p>
+    </div>
+  </div>
+</section>
 
       {/* ===== CTA ===== */}
       <section className="py-20 px-4">
