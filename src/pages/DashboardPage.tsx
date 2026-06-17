@@ -708,6 +708,23 @@ export default function DashboardPage() {
           >
             <LogOut size={17} />
           </button>
+
+          {/* ★ CTA кнопка обновления тарифа на мобилках */}
+          {!isPremium && (
+            <a
+              href="https://t.me/beautysaas_support_bot"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`ml-2 p-1.5 rounded-lg shrink-0 ${
+                isTrialActive && trialDaysLeft > 3
+                  ? 'bg-emerald-700/40 text-emerald-300'
+                  : 'bg-amber-500/30 text-amber-300 animate-pulse'
+              }`}
+              title={isTrialActive ? 'Перейти на PRO' : 'Обновить тариф'}
+            >
+              <Star size={16} />
+            </a>
+          )}
         </div>
 
         {/* Page Header */}

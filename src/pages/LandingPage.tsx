@@ -595,20 +595,24 @@ export default function LandingPage() {
 
         {/* Кнопки */}
         <div className="space-y-3">
-          <button
-            onClick={() => navigate('/login')}
+          <a
+            href="https://t.me/beautysaas_support_bot?start=trial"
+            target="_blank"
+            rel="noopener noreferrer"
             className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-bold px-6 py-4 rounded-2xl transition-all text-sm shadow-lg shadow-emerald-900/30"
           >
             <span>🎁</span>
             Попробовать 14 дней бесплатно
-          </button>
-          <button
-            onClick={() => navigate('/login')}
+          </a>
+          <a
+            href="https://t.me/beautysaas_support_bot?start=pay_solo"
+            target="_blank"
+            rel="noopener noreferrer"
             className="w-full flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 font-semibold px-6 py-3.5 rounded-2xl transition-all text-sm"
           >
             <span>💳</span>
             Купить подписку — 550 ₽/мес
-          </button>
+          </a>
         </div>
 
         <p className="text-xs text-gray-600 text-center mt-4">
@@ -703,20 +707,24 @@ export default function LandingPage() {
 
         {/* Кнопки */}
         <div className="space-y-3">
-          <button
-            onClick={() => navigate('/login')}
+          <a
+            href="https://t.me/beautysaas_support_bot?start=trial"
+            target="_blank"
+            rel="noopener noreferrer"
             className="w-full flex items-center justify-center gap-2 bg-amber-400 hover:bg-amber-300 active:bg-amber-500 text-gray-900 font-black px-6 py-4 rounded-2xl transition-all text-sm shadow-lg shadow-amber-900/30"
           >
             <span>🎁</span>
             Попробовать 14 дней бесплатно
-          </button>
-          <button
-            onClick={() => navigate('/login')}
+          </a>
+          <a
+            href="https://t.me/beautysaas_support_bot?start=pay_salon"
+            target="_blank"
+            rel="noopener noreferrer"
             className="w-full flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 font-semibold px-6 py-3.5 rounded-2xl transition-all text-sm"
           >
             <span>💳</span>
             Купить подписку — 990 ₽/мес
-          </button>
+          </a>
         </div>
 
         <p className="text-xs text-gray-600 text-center mt-4">
