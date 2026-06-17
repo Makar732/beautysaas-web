@@ -90,16 +90,6 @@ function getMonthName(monthIndex: number): string {
   return MONTH_NAMES_RU[monthIndex];
 }
 
-// ─── Хелпер: дней до даты (+ будущее, - прошлое) ───────────
-function daysUntil(isoDate: string | null | undefined): number {
-  if (!isoDate) return 0;
-  const target = new Date(isoDate);
-  const now = new Date();
-  target.setHours(0, 0, 0, 0);
-  now.setHours(0, 0, 0, 0);
-  return Math.round((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-}
-
 // ─────────────────────────────────────────────────────────────
 // Хелпер: бейдж подписки с детальным счётчиком дней
 // ─────────────────────────────────────────────────────────────
@@ -195,7 +185,6 @@ export default function DashboardPage() {
     trialDaysLeft,
     planType,
     premiumDaysLeft,
-    premiumExpiresAt,
   } = useAuth();
   const navigate = useNavigate();
 

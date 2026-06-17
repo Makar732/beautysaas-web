@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Sparkles, ArrowRight, Calendar, Users, TrendingUp, Star,
-  CheckCircle, MessageCircle, Shield, Zap, Bell,
+  Sparkles, Calendar, Users, TrendingUp, Star,
+  MessageCircle, Shield, Zap, Bell,
   ChevronRight, Phone, ExternalLink, BarChart3, Settings
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
