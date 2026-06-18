@@ -5,10 +5,11 @@ import {
   Clock, ArrowRight, Calendar, AlertCircle, Scissors, Home, Bell
 } from 'lucide-react';
 import {
-  getMasterBySlug, getServicesByMasterId, getBookingsByMasterId, addBooking
+  getMasterBySlug, getServicesByMasterId, getBookingsByMasterId,
+  addBooking, getSalonMasters,
 } from '../lib/storage';
+import { Master, Service, Booking, SalonMaster } from '../types';
 import { sendTelegramNotification } from '../lib/telegram';
-import { Master, Service, Booking } from '../types';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { PhoneInput, isPhoneComplete } from '../components/ui/PhoneInput';
@@ -87,7 +88,7 @@ function getOccupiedSlotsByBooking(startTime: string, durationMinutes: number): 
   return occupiedSlots;
 }
 
-type Step = 'service' | 'datetime' | 'contacts' | 'success';
+type Step = 'master' | 'service' | 'datetime' | 'contacts' | 'success';
 
 const MONTH_NAMES = [
   'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
@@ -117,6 +118,11 @@ export default function BookingPage() {
   const [loading, setLoading] = useState(false);
   const [createdBooking, setCreatedBooking] = useState<Booking | null>(null);
 
+  // ★ НОВОЕ: для тарифа Салон
+  const [salonMasters, setSalonMasters]           = useState<SalonMaster[]>([]);
+  const [selectedMaster, setSelectedMaster]       = useState<SalonMaster | null>(null);
+  const [isSalonBooking, setIsSalonBooking]       = useState(false);
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -137,14 +143,25 @@ export default function BookingPage() {
       setServices(masterServices);
       setExistingBookings(masterBookings);
 
-      // Проверяем лимит 30 записей/месяц для бесплатного тарифа
+      // ★ НОВОЕ: если тариф Салон — загружаем мастеров
+      const isSalon =
+        foundMaster.plan_type === 'salon' && foundMaster.is_premium === true;
+
+      if (isSalon) {
+        const masters = await getSalonMasters(foundMaster.id);
+        setSalonMasters(masters);
+        setIsSalonBooking(masters.length > 0);
+        // Начинаем с шага выбора мастера
+        setStep('master');
+      }
+
+      // Проверяем лимит записей
       if (!foundMaster.is_premium) {
         const now = new Date();
         const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
         const monthBookingsCount = masterBookings.filter(
           b => b.date.startsWith(monthPrefix) && b.status !== 'cancelled'
         ).length;
-
         if (monthBookingsCount >= FREE_BOOKINGS_LIMIT) {
           setIsBookingLimitReached(true);
         }
@@ -252,6 +269,8 @@ export default function BookingPage() {
       time: selectedTime,
       status: 'pending',
       client_tg_chat_id: '',
+      // ★ НОВОЕ: привязка к мастеру салона
+      salon_master_id: selectedMaster?.id ?? null,
       created_at: new Date().toISOString(),
     };
 
@@ -278,6 +297,28 @@ export default function BookingPage() {
       console.warn('⚠️ Telegram мастера не подключён — уведомление не отправлено');
     }
 
+    // ★ НОВОЕ: уведомляем мастера салона если выбран
+    if (selectedMaster?.telegram_chat_id) {
+      try {
+        await fetch('/api/notify-salon-master', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            salon_master_id: selectedMaster.id,
+            booking: {
+              clientName:  booking.client_name,
+              clientPhone: booking.client_phone,
+              serviceName: booking.service_name,
+              date:        formatDateRU(selectedDate),
+              time:        booking.time,
+            },
+          }),
+        });
+      } catch (e) {
+        console.warn('Не удалось уведомить мастера салона:', e);
+      }
+    }
+
     setLoading(false);
     setStep('success');
 
@@ -285,7 +326,9 @@ export default function BookingPage() {
     setExistingBookings(updatedBookings);
   };
 
-  const stepIndex = { service: 0, datetime: 1, contacts: 2, success: 3 };
+  const stepIndex = {
+    master: 0, service: 1, datetime: 2, contacts: 3, success: 4,
+  };
   const isContactsValid = clientName.trim().length >= 2 && isPhoneComplete(clientPhone);
 
   // Deep link для клиента в Telegram-бота
@@ -384,7 +427,10 @@ export default function BookingPage() {
 
           {step !== 'success' && (
             <div className="flex items-center gap-3 mt-8">
-              {(['service', 'datetime', 'contacts'] as const).map((s, i) => (
+              {(isSalonBooking
+                ? (['master', 'service', 'datetime', 'contacts'] as const)
+                : (['service', 'datetime', 'contacts'] as const)
+              ).map((s, i) => (
                 <div key={s} className="flex items-center gap-3">
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
                     stepIndex[step] > i
@@ -396,11 +442,14 @@ export default function BookingPage() {
                     {stepIndex[step] > i ? <Check size={16} /> : i + 1}
                   </div>
                   <span className={`text-sm hidden sm:block ${stepIndex[step] === i ? 'text-white font-semibold' : 'text-white/40'}`}>
-                    {s === 'service' && 'Услуга'}
+                    {s === 'master'   && 'Мастер'}
+                    {s === 'service'  && 'Услуга'}
                     {s === 'datetime' && 'Дата и время'}
                     {s === 'contacts' && 'Контакты'}
                   </span>
-                  {i < 2 && <div className={`h-px w-8 sm:w-16 ${stepIndex[step] > i ? 'bg-emerald-400' : 'bg-white/10'}`} />}
+                  {i < (isSalonBooking ? 3 : 2) && (
+                    <div className={`h-px w-8 sm:w-12 ${stepIndex[step] > i ? 'bg-emerald-400' : 'bg-white/10'}`} />
+                  )}
                 </div>
               ))}
             </div>
@@ -410,10 +459,82 @@ export default function BookingPage() {
 
       <main className="max-w-3xl mx-auto px-4 py-8 pb-24">
 
+        {/* ===== ШАГ 0: ВЫБОР МАСТЕРА (только Салон) ===== */}
+        {step === 'master' && isSalonBooking && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Выберите мастера</h2>
+            <p className="text-gray-500 mb-8">
+              {salonMasters.length} {salonMasters.length === 1 ? 'специалист' : 'специалиста'} доступно
+            </p>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              {salonMasters.map((sm) => (
+                <button
+                  key={sm.id}
+                  onClick={() => {
+                    setSelectedMaster(sm);
+                    setStep('service');
+                  }}
+                  className="bg-white rounded-3xl border border-gray-200 p-6 text-left
+                    hover:border-emerald-400 hover:shadow-xl hover:shadow-emerald-900/5
+                    transition-all cursor-pointer group relative overflow-hidden"
+                >
+                  <div className="absolute top-0 right-0 p-4 opacity-0
+                    group-hover:opacity-100 transition-opacity
+                    transform translate-x-4 group-hover:translate-x-0">
+                    <ArrowRight className="text-emerald-500" size={20} />
+                  </div>
+
+                  <div className="flex items-center gap-4 mb-4">
+                    <div
+                      className="w-14 h-14 rounded-2xl flex items-center justify-center
+                        text-white text-2xl font-bold shrink-0
+                        group-hover:scale-105 transition-transform"
+                      style={{ backgroundColor: sm.color }}
+                    >
+                      {sm.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-gray-900 text-lg leading-tight">
+                        {sm.name}
+                      </h3>
+                      {sm.specialization && (
+                        <p className="text-sm text-gray-500 mt-0.5">
+                          {sm.specialization}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div
+                    className="h-1 rounded-full w-full opacity-30
+                      group-hover:opacity-60 transition-opacity"
+                    style={{ backgroundColor: sm.color }}
+                  />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* ===== ШАГ 1: ВЫБОР УСЛУГИ ===== */}
         {step === 'service' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Выберите услугу</h2>
+
+            {/* Кнопка назад — только для Салона */}
+            {isSalonBooking && (
+              <button
+                onClick={() => setStep('master')}
+                className="inline-flex items-center gap-2 text-sm font-medium
+                  text-gray-500 hover:text-gray-900 mb-6 bg-white px-4 py-2
+                  rounded-xl border border-gray-200 shadow-sm transition-all"
+              >
+                <ChevronLeft size={16} />
+                Назад к выбору мастера
+              </button>
+            )}
+
             <p className="text-gray-500 mb-8">
               {services.length === 0
                 ? 'Мастер пока не добавил услуги'
@@ -811,7 +932,8 @@ export default function BookingPage() {
                 size="lg"
                 className="w-full"
                 onClick={() => {
-                  setStep('service');
+                  setStep(isSalonBooking ? 'master' : 'service');
+                  setSelectedMaster(null);
                   setSelectedService(null);
                   setSelectedDate(null);
                   setSelectedTime(null);
