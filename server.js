@@ -306,6 +306,62 @@ app.post('/api/broadcast', async (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════════════
+// API: Уведомление мастера САЛОНА о новой записи
+// Директор добавил запись → мастер получает уведомление в Telegram
+// ════════════════════════════════════════════════════════════════
+app.post('/api/notify-salon-master', async (req, res) => {
+  const { salon_master_id, booking } = req.body;
+
+  if (!salon_master_id || !booking) {
+    return res.status(400).json({ error: 'Missing salon_master_id or booking' });
+  }
+
+  // Получаем данные мастера салона из БД
+  const { data: salonMaster, error } = await supabase
+    .from('salon_masters')
+    .select('id, name, telegram_chat_id, director_id')
+    .eq('id', salon_master_id)
+    .single();
+
+  if (error || !salonMaster) {
+    console.warn(`[notify-salon-master] Мастер не найден: ${salon_master_id}`);
+    return res.status(404).json({ error: 'Salon master not found' });
+  }
+
+  // Нет Telegram — тихий успех
+  if (!salonMaster.telegram_chat_id) {
+    console.log(`[notify-salon-master] У мастера ${salonMaster.name} нет Telegram`);
+    return res.json({ success: true, skipped: true, reason: 'no_telegram' });
+  }
+
+  // Проверяем подписку директора
+  const canNotify = await isMasterSubscriptionActive(salonMaster.director_id);
+  if (!canNotify) {
+    console.log(`[notify-salon-master] Директор ${salonMaster.director_id} — подписка истекла`);
+    return res.json({ success: true, blocked: true, reason: 'trial_expired' });
+  }
+
+  const text =
+    `🌸 <b>Новая запись для вас!</b>\n\n` +
+    `👤 <b>Клиент:</b> ${booking.clientName  || '—'}\n` +
+    `📞 <b>Телефон:</b> ${booking.clientPhone || '—'}\n` +
+    `✨ <b>Услуга:</b> ${booking.serviceName  || '—'}\n` +
+    `📅 <b>Дата:</b> ${booking.date           || '—'}\n` +
+    `🕐 <b>Время:</b> ${booking.time          || '—'}\n\n` +
+    `<i>Уведомление от BeautySaaS 💅</i>`;
+
+  const success = await sendTelegramMessage(
+    NOTIFY_BOT_TOKEN,
+    salonMaster.telegram_chat_id,
+    text
+  );
+
+  return success
+    ? res.json({ success: true })
+    : res.status(500).json({ error: 'Failed to send Telegram notification' });
+});
+
+// ════════════════════════════════════════════════════════════════
 // API: Рассылка напоминаний клиентам (cron)
 // ════════════════════════════════════════════════════════════════
 app.post('/api/send-reminders', async (req, res) => {
@@ -456,11 +512,87 @@ app.post('/webhook/telegram', async (req, res) => {
     }
 
     // ──────────────────────────────────────────────────────────
-    // МАСТЕРСКИЙ СЦЕНАРИЙ: /start <masterId>
+    // СЦЕНАРИЙ МАСТЕРА САЛОНА: /start sm_<directorId>_<token>
+    // Мастер переходит по ссылке-приглашению от директора
+    // ──────────────────────────────────────────────────────────
+    if (param && param.startsWith('sm_')) {
+      const linkCode = param;
+      console.log(`🎯 Онбординг мастера салона, link_code: ${linkCode}`);
+
+      // Ищем мастера по link_code
+      const { data: salonMaster, error: smError } = await supabase
+        .from('salon_masters')
+        .select('id, name, director_id, telegram_chat_id, link_code')
+        .eq('link_code', linkCode)
+        .single();
+
+      if (smError || !salonMaster) {
+        console.error('❌ Мастер салона не найден по link_code:', linkCode);
+        await sendTelegramMessage(
+          NOTIFY_BOT_TOKEN, chatId,
+          `❌ <b>Ссылка недействительна</b>\n\n` +
+          `Попросите директора салона прислать новую ссылку для привязки.`
+        );
+        return;
+      }
+
+      // Уже привязан?
+      if (salonMaster.telegram_chat_id &&
+          salonMaster.telegram_chat_id === String(chatId)) {
+        await sendTelegramMessage(
+          NOTIFY_BOT_TOKEN, chatId,
+          `✅ <b>Вы уже подключены!</b>\n\n` +
+          `Уведомления о ваших записях будут приходить сюда автоматически.`
+        );
+        return;
+      }
+
+      // Привязываем telegram_chat_id
+      const { error: updateError } = await supabase
+        .from('salon_masters')
+        .update({ telegram_chat_id: String(chatId) })
+        .eq('id', salonMaster.id);
+
+      if (updateError) {
+        console.error('❌ Ошибка привязки telegram_chat_id:', updateError);
+        await sendTelegramMessage(
+          NOTIFY_BOT_TOKEN, chatId,
+          `❌ Произошла ошибка. Попробуйте позже.`
+        );
+        return;
+      }
+
+      // Получаем имя директора для сообщения
+      const { data: director } = await supabase
+        .from('profiles')
+        .select('name')
+        .eq('id', salonMaster.director_id)
+        .single();
+
+      const directorName = director?.name || 'директора';
+
+      console.log(
+        `✅ Мастер салона привязан: ${salonMaster.name} ` +
+        `(${salonMaster.id}), chat_id=${chatId}`
+      );
+
+      await sendTelegramMessage(
+        NOTIFY_BOT_TOKEN, chatId,
+        `🎉 <b>Готово, ${salonMaster.name}!</b>\n\n` +
+        `Вы успешно подключены к салону <b>${directorName}</b>.\n\n` +
+        `Теперь вы будете получать уведомления о каждой записи, ` +
+        `назначенной на вас, прямо сюда.\n\n` +
+        `📲 Как только появится новая запись — вы моментально узнаете!`
+      );
+      return;
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // МАСТЕРСКИЙ СЦЕНАРИЙ: /start <masterId> (владелец аккаунта)
     // ──────────────────────────────────────────────────────────
     if (param && !param.startsWith('appt_')) {
       const masterId = param;
-      console.log(`🔧 Мастер, id: ${masterId}`);
+      console.log(`🔧 Мастер-владелец, id: ${masterId}`);
 
       const { data: profile, error } = await supabase
         .from('profiles')
@@ -478,7 +610,6 @@ app.post('/webhook/telegram', async (req, res) => {
         return;
       }
 
-      // Уже подключён
       if (profile.telegram_id && profile.telegram_id === String(chatId)) {
         await sendTelegramMessage(
           NOTIFY_BOT_TOKEN, chatId,
@@ -488,7 +619,6 @@ app.post('/webhook/telegram', async (req, res) => {
         return;
       }
 
-      // Привязываем telegram_id
       const { error: updateError } = await supabase
         .from('profiles')
         .update({
@@ -506,7 +636,10 @@ app.post('/webhook/telegram', async (req, res) => {
         return;
       }
 
-      console.log(`✅ Telegram привязан: мастер ${profile.name} (${masterId}), chat_id=${chatId}`);
+      console.log(
+        `✅ Telegram привязан: мастер ${profile.name} ` +
+        `(${masterId}), chat_id=${chatId}`
+      );
 
       await sendTelegramMessage(
         NOTIFY_BOT_TOKEN, chatId,
