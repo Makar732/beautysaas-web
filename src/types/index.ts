@@ -1,3 +1,5 @@
+// src/types/index.ts
+
 export interface AppUser {
   id: string;
   name: string;
@@ -9,15 +11,9 @@ export interface AppUser {
   telegram_id?: string;
   trial_start_date?: string;
   is_premium?: boolean;
-
-  // ★ НОВОЕ v2.0
   plan_type?: 'solo' | 'salon';
   premium_expires_at?: string | null;
-
-  workingHours?: {
-    start: string;
-    end: string;
-  };
+  workingHours?: { start: string; end: string };
   daysOff?: number[];
 }
 
@@ -31,15 +27,9 @@ export interface Master {
   telegram_id?: string;
   trial_start_date?: string;
   is_premium?: boolean;
-
-  // ★ НОВОЕ v2.0
   plan_type?: 'solo' | 'salon';
   premium_expires_at?: string | null;
-
-  workingHours?: {
-    start: string;
-    end: string;
-  };
+  workingHours?: { start: string; end: string };
   daysOff?: number[];
   created_at: string;
 }
@@ -64,5 +54,25 @@ export interface Booking {
   time: string;
   status: 'pending' | 'confirmed' | 'cancelled';
   client_tg_chat_id?: string;
+  // ★ НОВОЕ: привязка к мастеру салона
+  salon_master_id?: string | null;
   created_at: string;
 }
+
+// ★ НОВОЕ: мастер в составе салона
+export interface SalonMaster {
+  id: string;
+  director_id: string;
+  name: string;
+  specialization: string;
+  color: string;
+  link_code: string;
+  telegram_chat_id: string;
+  created_at: string;
+}
+
+// ★ НОВОЕ: лимиты по тарифам
+export const MASTER_LIMITS = {
+  solo:  0,
+  salon: 3,
+} as const;
