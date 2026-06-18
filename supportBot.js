@@ -1,6 +1,5 @@
 // supportBot.js
-// Бот поддержки BeautySaaS — ESM, без внешних зависимостей (чистый fetch)
-// Работает через webhook, как и основной бот уведомлений.
+// Бот поддержки BeautySaaS — обновлённая версия с покупкой тарифов
 
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -18,12 +17,9 @@ const SBP_URL       = process.env.SBP_PAYMENT_URL            || '';
 const QR_PATH       = path.join(__dirname, 'qr-payment.png');
 
 // ─────────────────────────────────────────────
-// НИЗКОУРОВНЕВЫЕ ХЕЛПЕРЫ (Telegram Bot API)
+// НИЗКОУРОВНЕВЫЕ ХЕЛПЕРЫ
 // ─────────────────────────────────────────────
 
-/**
- * Универсальный вызов метода Telegram Bot API (JSON-тело).
- */
 async function callTg(method, payload) {
   if (!SUPPORT_TOKEN) {
     console.error('[supportBot] ❌ TELEGRAM_SUPPORT_BOT_TOKEN не задан');
@@ -49,9 +45,6 @@ async function callTg(method, payload) {
   }
 }
 
-/**
- * Отправка текстового сообщения с HTML-разметкой.
- */
 async function sendMessage(chatId, text, extra = {}) {
   return callTg('sendMessage', {
     chat_id:    chatId,
@@ -61,30 +54,22 @@ async function sendMessage(chatId, text, extra = {}) {
   });
 }
 
-/**
- * Отправка фото (файл) с подписью через multipart/form-data.
- * Telegram требует multipart для отправки бинарного файла.
- */
 async function sendPhotoFile(chatId, filePath, caption, replyMarkup) {
   if (!SUPPORT_TOKEN) return null;
 
   try {
-    // Читаем файл в буфер
     const fileBuffer  = fs.readFileSync(filePath);
     const fileName    = path.basename(filePath);
 
-    // Формируем multipart вручную (Node.js не имеет FormData в старых версиях,
-    // но fetch глобально доступен в Node 18+ вместе с File/Blob)
     const formData = new FormData();
-    formData.append('chat_id',  String(chatId));
-    formData.append('caption',  caption);
-    formData.append('parse_mode', 'HTML');
+    formData.append('chat_id',     String(chatId));
+    formData.append('caption',     caption);
+    formData.append('parse_mode',  'HTML');
 
     if (replyMarkup) {
       formData.append('reply_markup', JSON.stringify(replyMarkup));
     }
 
-    // Создаём Blob из буфера
     const blob = new Blob([fileBuffer], { type: 'image/png' });
     formData.append('photo', blob, fileName);
 
@@ -103,16 +88,12 @@ async function sendPhotoFile(chatId, filePath, caption, replyMarkup) {
   }
 }
 
-/**
- * Пересылка фото от пользователя — по file_id (уже на серверах Telegram).
- * Не требует multipart, используем JSON.
- */
 async function forwardPhotoToAdmin(adminId, fileId, caption) {
   return callTg('sendPhoto', {
-    chat_id:      adminId,
-    photo:        fileId,
+    chat_id:    adminId,
+    photo:      fileId,
     caption,
-    parse_mode:   'HTML',
+    parse_mode: 'HTML',
   });
 }
 
@@ -120,19 +101,20 @@ async function forwardPhotoToAdmin(adminId, fileId, caption) {
 // КЛАВИАТУРЫ
 // ─────────────────────────────────────────────
 
-/** Reply-клавиатура главного меню */
+/** ★ НОВОЕ главное меню */
 const MAIN_KEYBOARD = {
   reply_markup: {
     keyboard: [
-      [{ text: '💎 Продлить подписку (990 ₽)' }],
-      [{ text: '❓ Задать вопрос поддержке'    }],
+      [{ text: '💎 Купить тариф "Соло" — 550 ₽' }],
+      [{ text: '🏆 Купить тариф "Салон" — 990 ₽' }],
+      [{ text: '❓ Связаться с поддержкой' }],
     ],
     resize_keyboard:   true,
     one_time_keyboard: false,
   },
 };
 
-/** Inline-кнопка «Перейти к оплате СБП» */
+/** Inline-кнопка СБП */
 function paymentInlineKeyboard() {
   return {
     inline_keyboard: [
@@ -145,51 +127,120 @@ function paymentInlineKeyboard() {
 // СЦЕНАРИИ
 // ─────────────────────────────────────────────
 
-/** Приветствие по /start — показываем главное меню */
-async function handleStart(chatId, firstName) {
+/** /start — приветствие */
+async function handleStart(chatId, firstName, param) {
+  // ── Если есть параметр (buy_solo, buy_salon, trial_...) ───
+  if (param) {
+    if (param === 'buy_solo') {
+      await handlePaymentSolo(chatId);
+      return;
+    }
+    if (param === 'buy_salon') {
+      await handlePaymentSalon(chatId);
+      return;
+    }
+    if (param.startsWith('trial_')) {
+      const plan = param.replace('trial_', ''); // solo | salon
+      await handleTrial(chatId, plan);
+      return;
+    }
+  }
+
+  // ── Обычное приветствие ────────────────────────────────────
   await sendMessage(
     chatId,
-    `👋 Привет, <b>${firstName}</b>! Я служба поддержки <b>BeautySaaS</b>.\n\n` +
-    `Здесь ты можешь продлить подписку или задать любой вопрос — выбери нужное:`,
+    `👋 Привет, <b>${firstName}</b>! Добро пожаловать в <b>BeautySaaS</b>!\n\n` +
+    `Здесь ты можешь:\n` +
+    `• 💎 Купить тариф "Соло" (550 ₽/мес)\n` +
+    `• 🏆 Купить тариф "Салон" (990 ₽/мес)\n` +
+    `• ❓ Задать вопрос поддержке\n\n` +
+    `Выбери нужное действие ниже ⬇️`,
     MAIN_KEYBOARD
   );
 }
 
-/** Пользователь нажал «Продлить подписку» */
-async function handlePayment(chatId) {
+/** ★ НОВОЕ — триал */
+async function handleTrial(chatId, plan) {
+  const planName = plan === 'solo' ? 'Соло' : 'Салон';
+  const price    = plan === 'solo' ? '550 ₽' : '990 ₽';
+
+  await sendMessage(
+    chatId,
+    `🎁 <b>Пробный период тарифа "${planName}"</b>\n\n` +
+    `У тебя <b>14 дней бесплатно</b> для тестирования всех возможностей!\n\n` +
+    `<b>Что дальше:</b>\n` +
+    `1️⃣ Зарегистрируйся на сайте beautysaas.ru\n` +
+    `2️⃣ Подключи свой Telegram для уведомлений\n` +
+    `3️⃣ Добавь услуги и поделись ссылкой для записи с клиентами\n\n` +
+    `Через 14 дней триал закончится — чтобы продолжить, купи подписку (${price}/мес).\n\n` +
+    `Нужна помощь? Нажми "❓ Связаться с поддержкой"`,
+    MAIN_KEYBOARD
+  );
+}
+
+/** ★ НОВОЕ — покупка Соло */
+async function handlePaymentSolo(chatId) {
   const caption =
-    `💳 <b>Продление подписки BeautySaaS — 990 ₽ / 30 дней</b>\n\n` +
+    `💎 <b>Тариф "Соло" — 550 ₽ / 30 дней</b>\n\n` +
+    `<b>Что входит:</b>\n` +
+    `• Онлайн-запись 24/7 через персональную ссылку\n` +
+    `• 1 активный мастер (для соло-специалиста)\n` +
+    `• До 10 активных услуг в прайсе\n` +
+    `• Telegram-уведомления о каждой записи\n` +
+    `• Аналитика выручки и загрузки\n\n` +
     `<b>Как оплатить:</b>\n` +
-    `• 📱 <b>С телефона:</b> нажмите кнопку «Перейти к оплате СБП» ниже\n` +
-    `• 💻 <b>С компьютера:</b> отсканируйте QR-код камерой телефона\n\n` +
-    `🛑 <b>Важно!</b> После успешной оплаты обязательно пришлите сюда <b>скриншот чека</b> — ` +
+    `• 📱 <b>С телефона:</b> нажмите кнопку ниже\n` +
+    `• 💻 <b>С компьютера:</b> отсканируйте QR-код\n\n` +
+    `🛑 <b>Важно!</b> После оплаты пришлите сюда <b>скриншот чека</b> — ` +
     `мы активируем подписку в течение нескольких минут!`;
 
-  // Проверяем, существует ли QR-файл
   if (fs.existsSync(QR_PATH)) {
     await sendPhotoFile(chatId, QR_PATH, caption, paymentInlineKeyboard());
   } else {
-    // Файл не найден — отправляем только текст с кнопкой
-    console.warn('[supportBot] ⚠️ qr-payment.png не найден, отправляем только текст');
     await sendMessage(chatId, caption, {
       reply_markup: paymentInlineKeyboard(),
     });
   }
 }
 
-/** Пользователь нажал «Задать вопрос» */
-async function handleAskQuestion(chatId) {
+/** ★ НОВОЕ — покупка Салон */
+async function handlePaymentSalon(chatId) {
+  const caption =
+    `🏆 <b>Тариф "Салон" — 990 ₽ / 30 дней</b>\n\n` +
+    `<b>Что входит:</b>\n` +
+    `• Всё из тарифа "Соло" + возможности для команды\n` +
+    `• Несколько мастеров в одной системе\n` +
+    `• Круглосуточная запись без администратора\n` +
+    `• Профессиональный имидж для клиентов\n` +
+    `• Аналитика по каждому мастеру\n` +
+    `• Авто-напоминания клиентам в Telegram\n` +
+    `• Приоритетная поддержка\n\n` +
+    `<b>Как оплатить:</b>\n` +
+    `• 📱 <b>С телефона:</b> нажмите кнопку ниже\n` +
+    `• 💻 <b>С компьютера:</b> отсканируйте QR-код\n\n` +
+    `🛑 <b>Важно!</b> После оплаты пришлите сюда <b>скриншот чека</b> — ` +
+    `мы активируем подписку в течение нескольких минут!`;
+
+  if (fs.existsSync(QR_PATH)) {
+    await sendPhotoFile(chatId, QR_PATH, caption, paymentInlineKeyboard());
+  } else {
+    await sendMessage(chatId, caption, {
+      reply_markup: paymentInlineKeyboard(),
+    });
+  }
+}
+
+/** ★ НОВОЕ — связаться с поддержкой */
+async function handleSupport(chatId) {
   await sendMessage(
     chatId,
-    `✍️ Напишите ваш вопрос прямо сюда — я передам его администратору.\n\n` +
-    `Мы стараемся отвечать в течение нескольких часов. 🕐`
+    `✍️ <b>Служба поддержки BeautySaaS</b>\n\n` +
+    `Напишите ваш вопрос прямо сюда — мы ответим в течение нескольких часов.\n\n` +
+    `Если нужна техническая помощь — опишите проблему подробно. 🛠`
   );
 }
 
-/**
- * Пересылаем текстовое сообщение от мастера администратору.
- * Оформление: имя, юзернейм, ID и текст.
- */
+/** Пересылка текста администратору */
 async function forwardTextToAdmin(from, text) {
   if (!ADMIN_TG_ID) {
     console.error('[supportBot] ❌ ADMIN_TG_ID не задан');
@@ -209,16 +260,13 @@ async function forwardTextToAdmin(from, text) {
   await sendMessage(ADMIN_TG_ID, adminText);
 }
 
-/**
- * Пересылаем фото (чек) от мастера администратору.
- */
+/** Пересылка фото (чека) администратору */
 async function forwardPhotoToAdminWithInfo(from, photoArray, userCaption) {
   if (!ADMIN_TG_ID) {
     console.error('[supportBot] ❌ ADMIN_TG_ID не задан');
     return;
   }
 
-  // Берём фото в наибольшем разрешении
   const bestPhoto = photoArray[photoArray.length - 1];
   const fileId    = bestPhoto.file_id;
 
@@ -226,7 +274,7 @@ async function forwardPhotoToAdminWithInfo(from, photoArray, userCaption) {
   const username = from.username ? `@${from.username}` : '—';
 
   const adminCaption =
-    `📩 <b>Новое обращение в поддержку!</b>\n\n` +
+    `📩 <b>Новое обращение (чек об оплате)</b>\n\n` +
     `👤 <b>От:</b> ${fullName}\n` +
     `🔗 <b>Username:</b> ${username}\n` +
     `🆔 <b>ID:</b> <code>${from.id}</code>\n\n` +
@@ -237,19 +285,12 @@ async function forwardPhotoToAdminWithInfo(from, photoArray, userCaption) {
 }
 
 // ─────────────────────────────────────────────
-// ГЛАВНЫЙ ОБРАБОТЧИК ОБНОВЛЕНИЙ
-// Вызывается из server.js при получении POST на /webhook/support
+// ГЛАВНЫЙ ОБРАБОТЧИК
 // ─────────────────────────────────────────────
 
-/**
- * Обрабатывает входящий update от Telegram.
- * @param {object} update  — тело запроса от Telegram
- */
 export async function handleSupportUpdate(update) {
   try {
     const msg = update.message;
-
-    // Игнорируем всё, что не является сообщением
     if (!msg) return;
 
     const chatId    = msg.chat.id;
@@ -257,47 +298,54 @@ export async function handleSupportUpdate(update) {
     const firstName = from?.first_name || 'Пользователь';
     const userId    = from?.id;
 
-    // ── Команда /start ──────────────────────────────────────
+    // ── /start с параметром или без ────────────────────────────
     if (msg.text?.startsWith('/start')) {
-      await handleStart(chatId, firstName);
+      const parts = msg.text.split(' ');
+      const param = parts[1]?.trim() || '';
+      await handleStart(chatId, firstName, param);
       return;
     }
 
-    // ── Кнопка «Продлить подписку» ───────────────────────────
-    if (msg.text === '💎 Продлить подписку (990 ₽)') {
-      await handlePayment(chatId);
+    // ── Кнопки главного меню ────────────────────────────────────
+    if (msg.text === '💎 Купить тариф "Соло" — 550 ₽') {
+      await handlePaymentSolo(chatId);
       return;
     }
 
-    // ── Кнопка «Задать вопрос» ───────────────────────────────
-    if (msg.text === '❓ Задать вопрос поддержке') {
-      await handleAskQuestion(chatId);
+    if (msg.text === '🏆 Купить тариф "Салон" — 990 ₽') {
+      await handlePaymentSalon(chatId);
       return;
     }
 
-    // ── Сообщения от самого администратора — не пересылаем ───
+    if (msg.text === '❓ Связаться с поддержкой') {
+      await handleSupport(chatId);
+      return;
+    }
+
+    // ── Сообщения от администратора — игнорируем ────────────────
     if (ADMIN_TG_ID && String(userId) === String(ADMIN_TG_ID)) {
       return;
     }
 
-    // ── Фото (чек об оплате или любое другое) ────────────────
+    // ── Фото (чек) ──────────────────────────────────────────────
     if (msg.photo) {
       await forwardPhotoToAdminWithInfo(from, msg.photo, msg.caption);
       await sendMessage(
         chatId,
-        `✅ <b>Спасибо!</b> Ваш чек получен.\n\n` +
-        `Мы проверим оплату и активируем подписку в течение нескольких минут. 🕐`
+        `✅ <b>Чек получен!</b>\n\n` +
+        `Мы проверим оплату и активируем подписку в течение нескольких минут. 🕐\n\n` +
+        `Если возникнут вопросы — напишем вам сюда.`
       );
       return;
     }
 
-    // ── Любой другой текст — пересылаем как вопрос ────────────
+    // ── Любой текст → в поддержку ───────────────────────────────
     if (msg.text) {
       await forwardTextToAdmin(from, msg.text);
       await sendMessage(
         chatId,
         `✅ <b>Сообщение получено!</b>\n\n` +
-        `Администратор ответит вам в ближайшее время. 🕐`
+        `Служба поддержки ответит вам в ближайшее время. 🕐`
       );
       return;
     }
@@ -308,17 +356,12 @@ export async function handleSupportUpdate(update) {
 }
 
 // ─────────────────────────────────────────────
-// УСТАНОВКА WEBHOOK ДЛЯ БОТА ПОДДЕРЖКИ
-// Вызывается из server.js при старте
+// УСТАНОВКА WEBHOOK
 // ─────────────────────────────────────────────
 
-/**
- * Регистрирует webhook для бота поддержки в Telegram.
- * @param {string} baseUrl  — публичный URL сервера (без слеша на конце)
- */
 export async function registerSupportBotWebhook(baseUrl) {
   if (!SUPPORT_TOKEN) {
-    console.warn('[supportBot] ⚠️ TELEGRAM_SUPPORT_BOT_TOKEN не задан — бот поддержки отключён');
+    console.warn('[supportBot] ⚠️ TELEGRAM_SUPPORT_BOT_TOKEN не задан');
     return;
   }
 
