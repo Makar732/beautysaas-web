@@ -294,12 +294,7 @@ export default function DashboardPage() {
   };
 
   // Цвет карточки записи (по мастеру салона или дефолт)
-  const getBookingColor = (b: Booking): string => {
-    if (!isSalon || !b.salon_master_id) return STATUS_COLORS[b.status];
-    const sm = salonMasters.find(m => m.id === b.salon_master_id);
-    if (!sm) return STATUS_COLORS[b.status];
-    return `border-l-4 text-gray-900 bg-opacity-20`;
-  };
+  
 
   const getMasterColor = (b: Booking): string => {
     if (!isSalon || !b.salon_master_id) return '';
