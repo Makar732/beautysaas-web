@@ -175,18 +175,18 @@ export default function LandingPage() {
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-12">
             {/* Кнопка демо: ведёт на реальный виджет демо-мастера */}
-            <a
-              href="https://beautysaas-web-production.up.railway.app/#/book/studiya-beauty-saas"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 bg-white text-gray-900 hover:bg-gray-100 font-semibold px-6 py-3 rounded-xl transition-all text-sm shadow-lg"
-            >
-              Протестировать виджет записи
-            </a>
-            <Button variant="secondary" size="lg" onClick={() => navigate('/login')}>
-              Попробовать бесплатно
-            </Button>
-          </div>
+<a
+  href="https://beautysaas-web-production.up.railway.app/#/book/studiya-beauty-saas"
+  target="_blank"
+  rel="noopener noreferrer"
+  className="inline-flex items-center gap-2 bg-amber-500 text-gray-950 hover:bg-amber-400 font-semibold px-6 py-3 rounded-xl transition-all text-sm shadow-lg shadow-amber-500/10"
+>
+  Протестировать виджет записи
+</a>
+<Button variant="secondary" size="lg" onClick={() => navigate('/login')}>
+  Попробовать бесплатно
+</Button>
+</div>
 
           {/* Tab switcher */}
           <div className="inline-flex bg-white/5 border border-white/10 rounded-2xl p-1 backdrop-blur-sm">
@@ -752,33 +752,33 @@ export default function LandingPage() {
 </section>
 
       {/* ===== CTA ===== */}
-      <section className="py-20 px-4">
-        <div className="max-w-4xl mx-auto bg-gradient-to-br from-emerald-900/50 to-gray-900 rounded-3xl border border-emerald-700/30 p-10 text-center relative overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-r from-emerald-800/10 to-transparent" />
-          <div className="relative">
-            <h2 className="text-3xl sm:text-4xl font-bold mb-4">
-              Готовы автоматизировать свой бизнес?
-            </h2>
-            <p className="text-gray-400 text-lg mb-8">
-              Протестируйте виджет записи прямо сейчас — без регистрации
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              {/* Кнопка демо: ведёт на реальный виджет демо-мастера */}
-              <a
-                href="https://beautysaas-web-production.up.railway.app/#/book/studiya-beauty-saas"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 bg-white text-gray-900 hover:bg-gray-100 font-semibold px-6 py-3 rounded-xl transition-all text-sm shadow-lg"
-              >
-                Протестировать виджет записи
-              </a>
-              <Button variant="secondary" size="lg" onClick={() => navigate('/login')}>
-                Войти / Зарегистрироваться
-              </Button>
-            </div>
-          </div>
-        </div>
-      </section>
+<section className="py-20 px-4">
+  <div className="max-w-4xl mx-auto bg-gradient-to-br from-emerald-900/50 to-gray-900 rounded-3xl border border-emerald-700/30 p-10 text-center relative overflow-hidden">
+    <div className="absolute inset-0 bg-gradient-to-r from-emerald-800/10 to-transparent" />
+    <div className="relative">
+      <h2 className="text-3xl sm:text-4xl font-bold mb-4">
+        Готовы автоматизировать свой бизнес?
+      </h2>
+      <p className="text-gray-400 text-lg mb-8">
+        Протестируйте виджет записи прямо сейчас — без регистрации
+      </p>
+      <div className="flex flex-col sm:flex-row gap-4 justify-center">
+        {/* Кнопка демо: теперь она сочного желтого цвета */}
+        <a
+          href="https://beautysaas-web-production.up.railway.app/#/book/studiya-beauty-saas"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center justify-center gap-2 bg-amber-500 text-gray-950 hover:bg-amber-400 font-semibold px-6 py-3 rounded-xl transition-all text-sm shadow-lg shadow-amber-500/10"
+        >
+          Протестировать виджет записи
+        </a>
+        <Button variant="secondary" size="lg" onClick={() => navigate('/login')}>
+          Войти / Зарегистрироваться
+        </Button>
+      </div>
+    </div>
+  </div>
+</section>
 
       {/* ===== FOOTER ===== */}
       <footer className="bg-gray-950 border-t border-white/5 py-10 px-4">
