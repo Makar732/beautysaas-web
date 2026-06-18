@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Sparkles, Calendar, Users, TrendingUp, Star,
   MessageCircle, Shield, Zap, Bell,
-  ChevronRight, Phone, ExternalLink, BarChart3, Settings
+  ChevronRight, ExternalLink, BarChart3, Settings
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 
@@ -37,7 +37,7 @@ const todayBookings = [
 const reviews = [
   {
     name: 'Елена Орлова',
-    role: 'Мастер-маникюрист, Краснодар',
+    role: 'Мастер-маникюра, Краснодар',
     avatar: '👩‍🎨',
     rating: 5,
     text: 'Работаю одна. Раньше тратила по 2 часа в день на переписку с клиентами в WhatsApp и путалась в блокноте. Теперь они записываются сами по ссылке, а я просто пилю ногти и зарабатываю.',
@@ -51,7 +51,7 @@ const reviews = [
   },
   {
     name: 'Юлия Захарова',
-    role: 'Мастер бровиста, Москва',
+    role: 'Мастер бровист, Москва',
     avatar: '✨',
     rating: 5,
     text: 'Простая интеграция, понятный интерфейс. Клиенты в восторге от возможности записываться 24/7. Теперь получаю запись даже ночью, пока сплю!',
@@ -596,7 +596,7 @@ export default function LandingPage() {
         {/* Кнопки */}
         <div className="space-y-3">
           <a
-            href="https://t.me/beautysaas_support_bot?start=trial_solo"
+            href="https://beautysaas-web-production.up.railway.app/#/login"
             target="_blank"
             rel="noopener noreferrer"
             className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-bold px-6 py-4 rounded-2xl transition-all text-sm shadow-lg shadow-emerald-900/30"
@@ -708,7 +708,7 @@ export default function LandingPage() {
         {/* Кнопки */}
         <div className="space-y-3">
           <a
-            href="https://t.me/beautysaas_support_bot?start=trial_salon"
+            href="https://beautysaas-web-production.up.railway.app/#/login"
             target="_blank"
             rel="noopener noreferrer"
             className="w-full flex items-center justify-center gap-2 bg-amber-400 hover:bg-amber-300 active:bg-amber-500 text-gray-900 font-black px-6 py-4 rounded-2xl transition-all text-sm shadow-lg shadow-amber-900/30"
@@ -793,7 +793,7 @@ export default function LandingPage() {
             </div>
 
             <div className="flex items-center gap-6 flex-wrap justify-center">
-              {/* ── ИСПРАВЛЕНО: ссылка на официального бот-поддержки ── */}
+              {/* Оставлена только Telegram поддержка */}
               <a
                 href={SUPPORT_TG_URL}
                 target="_blank"
@@ -801,15 +801,9 @@ export default function LandingPage() {
                 className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors text-sm"
               >
                 <MessageCircle size={16} />
-                Техподдержка
+                Поддержка в Telegram
               </a>
-              <a
-                href="tel:+78001234567"
-                className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors text-sm"
-              >
-                <Phone size={16} />
-                8 800 123-45-67
-              </a>
+              
               <a
                 href="#/privacy"
                 className="text-gray-400 hover:text-white transition-colors text-sm"
