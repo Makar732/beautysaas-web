@@ -29,7 +29,6 @@ const SLOT_MINUTES   = 30;
 const SLOT_HEIGHT_PX = 48;
 const FREE_SERVICES_LIMIT = 3;
 
-// Цвета для мастеров салона
 const MASTER_COLORS = [
   '#10b981', '#3b82f6', '#f59e0b', '#ef4444',
   '#8b5cf6', '#ec4899', '#14b8a6', '#f97316',
@@ -130,6 +129,86 @@ function getSubBadge(
   };
 }
 
+// ✅ НОВОЕ: алгоритм расчёта overlap-позиций карточек
+function computeOverlapLayout(
+  dayBookings: Booking[],
+  services: Service[],
+): Map<string, { width: number; left: number; maxCols: number }> {
+  const result = new Map<string, { width: number; left: number; maxCols: number }>();
+
+  if (dayBookings.length === 0) return result;
+
+  const intervals = dayBookings.map(b => {
+    const svc      = services.find(s => s.id === b.service_id);
+    const duration = svc?.duration ?? SLOT_MINUTES;
+    const startMin = timeToMinutes(b.time);
+    const endMin   = startMin + duration;
+    return { id: b.id, startMin, endMin };
+  });
+
+  const n    = intervals.length;
+  const used = new Array(n).fill(false);
+  const clusters: number[][] = [];
+
+  for (let i = 0; i < n; i++) {
+    if (used[i]) continue;
+    const cluster = [i];
+    used[i] = true;
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let j = 0; j < n; j++) {
+        if (used[j]) continue;
+        const overlapsAny = cluster.some(ci => {
+          const a = intervals[ci];
+          const b = intervals[j];
+          return a.startMin < b.endMin && b.startMin < a.endMin;
+        });
+        if (overlapsAny) {
+          cluster.push(j);
+          used[j] = true;
+          changed  = true;
+        }
+      }
+    }
+    clusters.push(cluster);
+  }
+
+  for (const cluster of clusters) {
+    const cols   = cluster.length;
+    const sorted = [...cluster].sort(
+      (a, b) => intervals[a].startMin - intervals[b].startMin,
+    );
+    const colAssign = new Map<number, number>();
+    const colEndMin = new Array(cols).fill(0);
+
+    for (const idx of sorted) {
+      const { startMin } = intervals[idx];
+      let assigned = -1;
+      for (let c = 0; c < cols; c++) {
+        if (colEndMin[c] <= startMin) { assigned = c; break; }
+      }
+      if (assigned === -1) assigned = 0;
+      colAssign.set(idx, assigned);
+      colEndMin[assigned] = intervals[idx].endMin;
+    }
+
+    const usedCols = Math.max(...[...colAssign.values()]) + 1;
+    const width    = 100 / usedCols;
+
+    for (const idx of cluster) {
+      const colIndex = colAssign.get(idx) ?? 0;
+      result.set(intervals[idx].id, {
+        width,
+        left: width * colIndex,
+        maxCols: usedCols,
+      });
+    }
+  }
+
+  return result;
+}
+
 // ─────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const {
@@ -138,7 +217,6 @@ export default function DashboardPage() {
   } = useAuth();
   const navigate = useNavigate();
 
-  // ── Tabs & UI state ──────────────────────────────────────
   const [activeTab,    setActiveTab]    = useState<Tab>('calendar');
   const [bookings,     setBookings]     = useState<Booking[]>([]);
   const [services,     setServices]     = useState<Service[]>([]);
@@ -150,7 +228,6 @@ export default function DashboardPage() {
   const [mobileView,   setMobileView]   = useState<'week'|'day'>('week');
   const [settingsSaved,setSettingsSaved]= useState(false);
 
-  // ── Salon Masters state ───────────────────────────────────
   const [salonMasters,       setSalonMasters]       = useState<SalonMaster[]>([]);
   const [masterCount,        setMasterCount]        = useState({ count:0, limit:1, canAdd:false });
   const [showAddMasterModal, setShowAddMasterModal] = useState(false);
@@ -161,24 +238,20 @@ export default function DashboardPage() {
   const [addingMaster,       setAddingMaster]       = useState(false);
   const [copiedLinkId,       setCopiedLinkId]       = useState<string|null>(null);
 
-  // ── Calendar filter ───────────────────────────────────────
   const [calendarMasterFilter, setCalendarMasterFilter] = useState<string|'all'>('all');
 
-  // ── Modals ────────────────────────────────────────────────
   const [showAddBookingModal,    setShowAddBookingModal]    = useState(false);
   const [showEditServiceModal,   setShowEditServiceModal]   = useState(false);
   const [showBookingDetailModal, setShowBookingDetailModal] = useState(false);
   const [selectedBooking,        setSelectedBooking]        = useState<Booking|null>(null);
   const [editingService,         setEditingService]         = useState<Service|null>(null);
 
-  // ── Settings ──────────────────────────────────────────────
   const [telegramChatId, setTelegramChatId] = useState('');
   const [workStart,      setWorkStart]      = useState('09:00');
   const [workEnd,        setWorkEnd]        = useState('21:00');
   const [daysOff,        setDaysOff]        = useState<number[]>([]);
   const [revenueMonth,   setRevenueMonth]   = useState(new Date());
 
-  // ── Forms ─────────────────────────────────────────────────
   const [bookingForm, setBookingForm] = useState({
     clientName:'', clientPhone:'', serviceId:'',
     date:'', time:'', salonMasterId:'',
@@ -187,7 +260,6 @@ export default function DashboardPage() {
     name:'', price:'', duration:'',
   });
 
-  // ── Computed ──────────────────────────────────────────────
   const isAdmin                = user?.id === ADMIN_UUID;
   const isSalon                = planType === 'salon' && isPremium;
   const isAnalyticsLocked      = !isPremium && !isTrialActive;
@@ -202,7 +274,6 @@ export default function DashboardPage() {
 
   const today = formatDate(new Date());
 
-  // ── ИСПРАВЛЕНИЕ 1: loadData обёрнута в useCallback ────────
   const loadData = useCallback(async () => {
     if (!user) return;
     setIsLoading(true);
@@ -220,7 +291,6 @@ export default function DashboardPage() {
       if (master.daysOff)          setDaysOff(master.daysOff);
     }
 
-    // Загружаем мастеров салона
     if (user.plan_type === 'salon' && user.is_premium) {
       const [masters, count] = await Promise.all([
         getSalonMasters(user.id),
@@ -233,14 +303,12 @@ export default function DashboardPage() {
     setIsLoading(false);
   }, [user]);
 
-  // ── ИСПРАВЛЕНИЕ 2: правильные зависимости useEffect ───────
   useEffect(() => {
     if (!user) { navigate('/login'); return; }
     setWeekDates(getWeekDates(currentDate));
     loadData();
   }, [user, currentDate, loadData, navigate]);
 
-  // ── Calendar helpers ──────────────────────────────────────
   const getVisibleSlots = (): string[] => {
     if (!workStart || !workEnd) return ALL_TIME_SLOTS;
     const startMin    = timeToMinutes(workStart);
@@ -253,7 +321,6 @@ export default function DashboardPage() {
     });
   };
 
-  // Фильтруем записи по выбранному мастеру
   const getFilteredBookings = (): Booking[] => {
     if (!isSalon || calendarMasterFilter === 'all') return bookings;
     return bookings.filter(b => b.salon_master_id === calendarMasterFilter);
@@ -293,16 +360,12 @@ export default function DashboardPage() {
     return filtered.filter(b => b.date === dateStr && b.status !== 'cancelled');
   };
 
-  // Цвет карточки записи (по мастеру салона или дефолт)
-  
-
   const getMasterColor = (b: Booking): string => {
     if (!isSalon || !b.salon_master_id) return '';
     const sm = salonMasters.find(m => m.id === b.salon_master_id);
     return sm?.color || '#10b981';
   };
 
-  // ── Handlers ─────────────────────────────────────────────
   const handleCellClick = (date: Date, slotTime: string) => {
     setBookingForm({
       clientName:'', clientPhone:'',
@@ -332,7 +395,6 @@ export default function DashboardPage() {
     };
     await addBooking(newBooking);
 
-    // Уведомляем мастера салона если выбран
     if (isSalon && bookingForm.salonMasterId) {
       try {
         await fetch('/api/notify-salon-master', {
@@ -423,19 +485,16 @@ export default function DashboardPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // ── Salon Masters handlers ────────────────────────────────
   const handleAddMaster = async () => {
     if (!masterForm.name.trim()) return;
     setAddingMaster(true);
     setMasterFormError('');
-
     const result = await addSalonMaster(masterId, masterForm, planType);
     if (!result.success) {
       setMasterFormError(result.error || 'Ошибка при добавлении');
       setAddingMaster(false);
       return;
     }
-
     await loadData();
     setShowAddMasterModal(false);
     setMasterForm({ name:'', specialization:'', color: MASTER_COLORS[0] });
@@ -455,7 +514,6 @@ export default function DashboardPage() {
     setTimeout(() => setCopiedLinkId(null), 2000);
   };
 
-  // ── Revenue helpers ───────────────────────────────────────
   const calculateMonthRevenue = (targetMonth: Date) => {
     const prefix = `${targetMonth.getFullYear()}-${String(targetMonth.getMonth()+1).padStart(2,'0')}`;
     return bookings
@@ -466,7 +524,6 @@ export default function DashboardPage() {
       }, 0);
   };
 
-  // Аналитика по мастерам салона
   const getMasterRevenue = (salonMasterId: string, targetMonth: Date) => {
     const prefix = `${targetMonth.getFullYear()}-${String(targetMonth.getMonth()+1).padStart(2,'0')}`;
     return bookings
@@ -525,7 +582,6 @@ export default function DashboardPage() {
 
   const visibleSlots = getVisibleSlots();
 
-  // ── ИСПРАВЛЕНИЕ 3: if (!user) return — ПОСЛЕ всех хуков ──
   if (!user) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -534,7 +590,6 @@ export default function DashboardPage() {
     );
   }
 
-  // ─────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-50 flex">
 
@@ -795,7 +850,6 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* Calendar top stats */}
           {activeTab === 'calendar' && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
               <div className="bg-gray-50 rounded-xl p-3 flex items-center gap-3">
@@ -837,7 +891,6 @@ export default function DashboardPage() {
           {/* ════════════════════════════════════════════════ */}
           {activeTab === 'calendar' && (
             <div>
-              {/* Фильтр по мастерам (только Салон) */}
               {isSalon && salonMasters.length > 0 && (
                 <div className="flex gap-2 mb-4 flex-wrap">
                   <button
@@ -861,10 +914,7 @@ export default function DashboardPage() {
                       }`}
                       style={calendarMasterFilter === sm.id ? { backgroundColor: sm.color } : {}}
                     >
-                      <span
-                        className="w-2 h-2 rounded-full"
-                        style={{ backgroundColor: sm.color }}
-                      />
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: sm.color }} />
                       {sm.name}
                     </button>
                   ))}
@@ -895,82 +945,147 @@ export default function DashboardPage() {
                 ))}
               </div>
 
-              {/* Desktop calendar */}
+              {/* ✅ Desktop calendar — ИСПРАВЛЕННАЯ ВЕРСИЯ */}
               <div className="hidden lg:block bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-                <div className="grid border-b border-gray-100" style={{ gridTemplateColumns:'72px repeat(7, 1fr)' }}>
+
+                {/* Шапка с днями */}
+                <div
+                  className="grid border-b border-gray-100"
+                  style={{ gridTemplateColumns: '72px repeat(7, 1fr)' }}
+                >
                   <div className="p-3 text-xs text-gray-400 text-center font-medium">Время</div>
                   {weekDates.map((d, i) => {
                     const isToday = formatDate(d) === today;
                     const cnt     = getDayBookings(d).length;
                     return (
-                      <div key={i} className={`p-3 text-center border-l border-gray-100 ${isToday?'bg-emerald-50':''}`}>
+                      <div key={i} className={`p-3 text-center border-l border-gray-100 ${isToday ? 'bg-emerald-50' : ''}`}>
                         <p className="text-xs text-gray-400 font-medium">{DAY_NAMES[i]}</p>
-                        <p className={`text-lg font-bold ${isToday?'text-emerald-600':'text-gray-900'}`}>{d.getDate()}</p>
-                        {cnt > 0 && <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">{cnt}</span>}
+                        <p className={`text-lg font-bold ${isToday ? 'text-emerald-600' : 'text-gray-900'}`}>{d.getDate()}</p>
+                        {cnt > 0 && (
+                          <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">{cnt}</span>
+                        )}
                       </div>
                     );
                   })}
                 </div>
-                <div className="overflow-y-auto max-h-[600px]">
-                  {visibleSlots.map(slotTime => {
-                    const isHalfHour = slotTime.endsWith(':30');
-                    return (
-                      <div key={slotTime}
-                        className={`grid border-b ${isHalfHour?'border-gray-50':'border-gray-100'}`}
-                        style={{ gridTemplateColumns:'72px repeat(7, 1fr)', height:`${SLOT_HEIGHT_PX}px` }}>
-                        <div className="text-xs text-gray-400 font-mono text-right pr-3 flex items-center justify-end">
-                          {isHalfHour ? <span className="text-gray-200">·</span> : slotTime}
-                        </div>
-                        {weekDates.map((d, di) => {
-                          const isToday  = formatDate(d) === today;
-                          const isCovered = isSlotCoveredByEarlierBooking(d, slotTime);
-                          const startingBookings = getBookingsStartingAtSlot(d, slotTime);
-                          return (
-                            <div key={di}
-                              onClick={() => !isCovered && handleCellClick(d, slotTime)}
-                              className={`border-l border-gray-100 relative ${isToday?'bg-emerald-50/20':''} ${!isCovered?'cursor-pointer group':''}`}
-                              style={{ height:`${SLOT_HEIGHT_PX}px`, overflow:'visible' }}>
-                              {!isCovered && startingBookings.length === 0 && (
-                                <div className="absolute inset-0.5 rounded-lg border-2 border-dashed border-transparent group-hover:border-emerald-200 transition-colors flex items-center justify-center z-0">
-                                  <Plus size={12} className="text-emerald-400 opacity-0 group-hover:opacity-100"/>
-                                </div>
-                              )}
-                              {startingBookings.map(b => {
-                                const cardHeight = getBookingCardHeight(b);
-                                const svc        = services.find(s => s.id === b.service_id);
-                                const duration   = svc?.duration ?? SLOT_MINUTES;
-                                const slotsCount = getSlotsCount(duration);
-                                const mColor     = getMasterColor(b);
-                                return (
-                                  <div key={b.id}
-                                    onClick={e => { e.stopPropagation(); setSelectedBooking(b); setShowBookingDetailModal(true); }}
-                                    className={`absolute left-0.5 right-0.5 top-0.5 rounded-lg border-l-4 px-1.5 py-1 text-xs cursor-pointer hover:shadow-lg transition-shadow ${STATUS_COLORS[b.status]}`}
-                                    style={{
-                                      height:`${cardHeight}px`, zIndex:2, overflow:'hidden',
-                                      ...(mColor ? { borderLeftColor: mColor } : {}),
-                                    }}>
-                                    <p className="font-semibold truncate leading-tight">{b.client_name}</p>
-                                    <p className="opacity-70 truncate text-xs">{b.service_name}</p>
-                                    <p className="opacity-50 text-xs">{b.time}</p>
-                                    {slotsCount > 1 && <p className="opacity-40 text-xs">{duration} мин</p>}
-                                    {isSalon && b.salon_master_id && (
-                                      <p className="text-xs font-medium mt-0.5 opacity-80">
-                                        {salonMasters.find(m => m.id === b.salon_master_id)?.name}
-                                      </p>
-                                    )}
-                                  </div>
-                                );
-                              })}
+
+                {/* ✅ Горизонтальный скролл если колонки расширились */}
+                <div style={{ overflowX: 'auto' }}>
+                  <div style={{ minWidth: '700px' }}>
+                    <div className="overflow-y-auto max-h-[600px]">
+
+                      {visibleSlots.map(slotTime => {
+                        const isHalfHour = slotTime.endsWith(':30');
+
+                        // ✅ Считаем динамическую ширину каждой колонки
+                        const colTemplates = weekDates.map(d => {
+                          const dayBks  = getDayBookings(d);
+                          const layout  = computeOverlapLayout(dayBks, services);
+                          const maxCols = dayBks.length === 0
+                            ? 1
+                            : Math.max(...dayBks.map(b => layout.get(b.id)?.maxCols ?? 1));
+                          // Расширяем колонку при 3+ одновременных записях
+                          return maxCols >= 3 ? `minmax(${maxCols * 80}px, 1fr)` : 'minmax(100px, 1fr)';
+                        }).join(' ');
+
+                        return (
+                          <div
+                            key={slotTime}
+                            className={`grid border-b ${isHalfHour ? 'border-gray-50' : 'border-gray-100'}`}
+                            style={{
+                              gridTemplateColumns: `72px ${colTemplates}`,
+                              height: `${SLOT_HEIGHT_PX}px`,
+                            }}
+                          >
+                            {/* Метка времени */}
+                            <div className="text-xs text-gray-400 font-mono text-right pr-3 flex items-center justify-end">
+                              {isHalfHour ? <span className="text-gray-200">·</span> : slotTime}
                             </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
+
+                            {/* Ячейки дней */}
+                            {weekDates.map((d, di) => {
+                              const isToday          = formatDate(d) === today;
+                              const isCovered        = isSlotCoveredByEarlierBooking(d, slotTime);
+                              const startingBookings = getBookingsStartingAtSlot(d, slotTime);
+
+                              // ✅ Layout для всего дня
+                              const dayBks = getDayBookings(d);
+                              const layout = computeOverlapLayout(dayBks, services);
+
+                              return (
+                                <div
+                                  key={di}
+                                  onClick={() => !isCovered && handleCellClick(d, slotTime)}
+                                  className={`border-l border-gray-100 relative ${
+                                    isToday ? 'bg-emerald-50/20' : ''
+                                  } ${!isCovered ? 'cursor-pointer group' : ''}`}
+                                  style={{ height: `${SLOT_HEIGHT_PX}px`, overflow: 'visible' }}
+                                >
+                                  {/* Подсказка при hover на пустую ячейку */}
+                                  {!isCovered && startingBookings.length === 0 && (
+                                    <div className="absolute inset-0.5 rounded-lg border-2 border-dashed border-transparent group-hover:border-emerald-200 transition-colors flex items-center justify-center z-0">
+                                      <Plus size={12} className="text-emerald-400 opacity-0 group-hover:opacity-100" />
+                                    </div>
+                                  )}
+
+                                  {/* ✅ Карточки с overlap-позиционированием */}
+                                  {startingBookings.map(b => {
+                                    const cardHeight = getBookingCardHeight(b);
+                                    const svc        = services.find(s => s.id === b.service_id);
+                                    const duration   = svc?.duration ?? SLOT_MINUTES;
+                                    const slotsCount = getSlotsCount(duration);
+                                    const mColor     = getMasterColor(b);
+
+                                    // ✅ Берём width и left из алгоритма
+                                    const ol = layout.get(b.id) ?? { width: 100, left: 0, maxCols: 1 };
+
+                                    return (
+                                      <div
+                                        key={b.id}
+                                        onClick={e => {
+                                          e.stopPropagation();
+                                          setSelectedBooking(b);
+                                          setShowBookingDetailModal(true);
+                                        }}
+                                        className={`absolute top-0.5 rounded-lg border-l-4 px-1.5 py-1 text-xs cursor-pointer hover:shadow-lg transition-shadow ${STATUS_COLORS[b.status]}`}
+                                        style={{
+                                          // ✅ Динамические left/width вместо left-0.5 right-0.5
+                                          left:     `calc(${ol.left}% + 1px)`,
+                                          width:    `calc(${ol.width}% - 2px)`,
+                                          height:   `${cardHeight}px`,
+                                          zIndex:   2,
+                                          overflow: 'hidden',
+                                          ...(mColor ? { borderLeftColor: mColor } : {}),
+                                        }}
+                                      >
+                                        <p className="font-semibold truncate leading-tight">{b.client_name}</p>
+                                        <p className="opacity-70 truncate text-xs">{b.service_name}</p>
+                                        <p className="opacity-50 text-xs">{b.time}</p>
+                                        {slotsCount > 1 && (
+                                          <p className="opacity-40 text-xs">{duration} мин</p>
+                                        )}
+                                        {isSalon && b.salon_master_id && (
+                                          <p className="text-xs font-medium mt-0.5 opacity-80">
+                                            {salonMasters.find(m => m.id === b.salon_master_id)?.name}
+                                          </p>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
+
+                    </div>
+                  </div>
                 </div>
               </div>
+              {/* ✅ /Desktop calendar */}
 
-              {/* Mobile views */}
+              {/* Mobile views — не трогаем */}
               <div className="lg:hidden">
                 {mobileView === 'day' ? (
                   <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
@@ -1127,16 +1242,13 @@ export default function DashboardPage() {
                     <div className="w-20 h-20 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-6">
                       <Users size={36} className="text-purple-500"/>
                     </div>
-                    <h2 className="text-2xl font-bold text-gray-900 mb-3">
-                      Управление командой
-                    </h2>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-3">Управление командой</h2>
                     <p className="text-gray-500 text-sm mb-2 leading-relaxed">
                       Добавляйте мастеров в свой салон, назначайте их на записи и получайте аналитику по каждому.
                     </p>
                     <p className="text-gray-400 text-xs mb-8">
                       Доступно на тарифе <strong className="text-purple-600">«Салон» — 990 ₽/мес</strong>
                     </p>
-
                     <div className="grid grid-cols-1 gap-3 mb-8 text-left">
                       {[
                         { icon:'👥', title:'До 3 мастеров', desc:'Каждый получает уведомления о своих записях' },
@@ -1153,14 +1265,12 @@ export default function DashboardPage() {
                         </div>
                       ))}
                     </div>
-
                     <a
                       href="https://t.me/beautysaas_support_bot"
                       target="_blank" rel="noopener noreferrer"
                       className="flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-500 text-white font-semibold px-6 py-3 rounded-xl transition-all w-full text-sm"
                     >
-                      <Star size={16}/>
-                      Перейти на тариф «Салон»
+                      <Star size={16}/>Перейти на тариф «Салон»
                     </a>
                   </div>
                 </div>
@@ -1183,11 +1293,8 @@ export default function DashboardPage() {
                       </div>
                     </div>
                     {!masterCount.canAdd && (
-                      <a
-                        href="https://t.me/beautysaas_support_bot"
-                        target="_blank" rel="noopener noreferrer"
-                        className="text-xs text-purple-600 hover:text-purple-700 font-medium"
-                      >
+                      <a href="https://t.me/beautysaas_support_bot" target="_blank" rel="noopener noreferrer"
+                        className="text-xs text-purple-600 hover:text-purple-700 font-medium">
                         Нужно больше? →
                       </a>
                     )}
@@ -1197,9 +1304,7 @@ export default function DashboardPage() {
                     <div className="bg-white rounded-2xl border border-dashed border-gray-300 p-12 text-center">
                       <Users size={48} className="text-gray-300 mx-auto mb-4"/>
                       <p className="text-gray-500 font-medium mb-2">Добавьте первого мастера</p>
-                      <p className="text-xs text-gray-400 mb-6">
-                        После добавления мастер получит ссылку для привязки Telegram
-                      </p>
+                      <p className="text-xs text-gray-400 mb-6">После добавления мастер получит ссылку для привязки Telegram</p>
                       <Button variant="primary" onClick={() => { setMasterFormError(''); setMasterForm({name:'',specialization:'',color:MASTER_COLORS[0]}); setShowAddMasterModal(true); }}>
                         <Plus size={16}/>Добавить мастера
                       </Button>
@@ -1210,10 +1315,8 @@ export default function DashboardPage() {
                         <div key={sm.id} className="bg-white rounded-2xl border border-gray-200 p-5 hover:shadow-md transition-shadow">
                           <div className="flex items-start justify-between mb-4">
                             <div className="flex items-center gap-3">
-                              <div
-                                className="w-12 h-12 rounded-xl flex items-center justify-center text-white text-lg font-bold"
-                                style={{ backgroundColor: sm.color }}
-                              >
+                              <div className="w-12 h-12 rounded-xl flex items-center justify-center text-white text-lg font-bold"
+                                style={{ backgroundColor: sm.color }}>
                                 {sm.name.charAt(0).toUpperCase()}
                               </div>
                               <div>
@@ -1221,37 +1324,25 @@ export default function DashboardPage() {
                                 <p className="text-xs text-gray-500">{sm.specialization || 'Мастер'}</p>
                               </div>
                             </div>
-                            <button
-                              onClick={() => handleDeleteMaster(sm.id)}
-                              className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-500 transition-colors cursor-pointer"
-                            >
+                            <button onClick={() => handleDeleteMaster(sm.id)}
+                              className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-500 transition-colors cursor-pointer">
                               <Trash2 size={14}/>
                             </button>
                           </div>
 
                           <div className={`rounded-xl p-3 mb-3 flex items-center gap-2 ${
-                            sm.telegram_chat_id
-                              ? 'bg-emerald-50 border border-emerald-100'
-                              : 'bg-gray-50 border border-gray-200'
+                            sm.telegram_chat_id ? 'bg-emerald-50 border border-emerald-100' : 'bg-gray-50 border border-gray-200'
                           }`}>
                             {sm.telegram_chat_id ? (
-                              <>
-                                <div className="w-2 h-2 rounded-full bg-emerald-500"/>
-                                <p className="text-xs font-medium text-emerald-700">Telegram подключён</p>
-                              </>
+                              <><div className="w-2 h-2 rounded-full bg-emerald-500"/><p className="text-xs font-medium text-emerald-700">Telegram подключён</p></>
                             ) : (
-                              <>
-                                <div className="w-2 h-2 rounded-full bg-gray-400"/>
-                                <p className="text-xs text-gray-500">Telegram не привязан</p>
-                              </>
+                              <><div className="w-2 h-2 rounded-full bg-gray-400"/><p className="text-xs text-gray-500">Telegram не привязан</p></>
                             )}
                           </div>
 
                           {sm.link_code && (
-                            <button
-                              onClick={() => handleCopyMasterLink(sm)}
-                              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-blue-300 transition-all cursor-pointer"
-                            >
+                            <button onClick={() => handleCopyMasterLink(sm)}
+                              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-blue-300 transition-all cursor-pointer">
                               {copiedLinkId === sm.id ? (
                                 <><Check size={14} className="text-emerald-500"/><span className="text-emerald-600">Скопировано!</span></>
                               ) : (
@@ -1263,11 +1354,7 @@ export default function DashboardPage() {
                           <div className="mt-3 pt-3 border-t border-gray-100">
                             <p className="text-xs text-gray-400">
                               Записей в этом месяце: <span className="font-semibold text-gray-700">
-                                {bookings.filter(b =>
-                                  b.salon_master_id === sm.id &&
-                                  b.date.startsWith(currentMonthPrefix) &&
-                                  b.status !== 'cancelled'
-                                ).length}
+                                {bookings.filter(b => b.salon_master_id === sm.id && b.date.startsWith(currentMonthPrefix) && b.status !== 'cancelled').length}
                               </span>
                             </p>
                             <p className="text-xs text-gray-400 mt-0.5">
@@ -1321,27 +1408,18 @@ export default function DashboardPage() {
                 {isSalon && salonMasters.length > 0 && (
                   <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
                     <h3 className="font-bold text-gray-900 text-lg mb-4 flex items-center gap-2">
-                      <Users size={18} className="text-purple-500"/>
-                      Выручка по мастерам
+                      <Users size={18} className="text-purple-500"/>Выручка по мастерам
                     </h3>
                     <div className="space-y-4">
                       {salonMasters.map(sm => {
                         const rev   = getMasterRevenue(sm.id, now);
-                        const count = bookings.filter(b =>
-                          b.salon_master_id === sm.id &&
-                          b.date.startsWith(currentMonthPrefix) &&
-                          b.status === 'confirmed'
-                        ).length;
-                        const maxRev = Math.max(
-                          ...salonMasters.map(m => getMasterRevenue(m.id, now)), 1
-                        );
-                        const pct = Math.round((rev / maxRev) * 100);
+                        const count = bookings.filter(b => b.salon_master_id === sm.id && b.date.startsWith(currentMonthPrefix) && b.status === 'confirmed').length;
+                        const maxRev = Math.max(...salonMasters.map(m => getMasterRevenue(m.id, now)), 1);
+                        const pct   = Math.round((rev / maxRev) * 100);
                         return (
                           <div key={sm.id} className="flex items-center gap-4">
-                            <div
-                              className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm shrink-0"
-                              style={{ backgroundColor: sm.color }}
-                            >
+                            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm shrink-0"
+                              style={{ backgroundColor: sm.color }}>
                               {sm.name.charAt(0).toUpperCase()}
                             </div>
                             <div className="flex-1">
@@ -1350,10 +1428,8 @@ export default function DashboardPage() {
                                 <p className="text-sm font-bold text-emerald-600">{rev.toLocaleString('ru-RU')} ₽</p>
                               </div>
                               <div className="w-full bg-gray-100 rounded-full h-2">
-                                <div
-                                  className="h-2 rounded-full transition-all duration-500"
-                                  style={{ width:`${pct}%`, backgroundColor: sm.color }}
-                                />
+                                <div className="h-2 rounded-full transition-all duration-500"
+                                  style={{ width:`${pct}%`, backgroundColor: sm.color }}/>
                               </div>
                               <p className="text-xs text-gray-400 mt-0.5">{count} записей</p>
                             </div>
@@ -1537,7 +1613,6 @@ export default function DashboardPage() {
 
       {/* ══ MODALS ══ */}
 
-      {/* Добавить запись */}
       <Modal isOpen={showAddBookingModal} onClose={() => setShowAddBookingModal(false)} title="Добавить запись">
         <div className="space-y-4">
           <Input label="Имя клиента" placeholder="Анна Иванова"
@@ -1588,7 +1663,6 @@ export default function DashboardPage() {
         </div>
       </Modal>
 
-      {/* Детали записи */}
       <Modal isOpen={showBookingDetailModal} onClose={() => setShowBookingDetailModal(false)} title="Детали записи">
         {selectedBooking && (
           <div className="space-y-4">
@@ -1638,7 +1712,6 @@ export default function DashboardPage() {
         )}
       </Modal>
 
-      {/* Редактировать услугу */}
       <Modal isOpen={showEditServiceModal} onClose={() => setShowEditServiceModal(false)} title={editingService ? 'Редактировать услугу' : 'Добавить услугу'}>
         <div className="space-y-4">
           <Input label="Название услуги" placeholder="Маникюр + покрытие"
@@ -1656,7 +1729,6 @@ export default function DashboardPage() {
         </div>
       </Modal>
 
-      {/* Добавить мастера салона */}
       <Modal isOpen={showAddMasterModal} onClose={() => setShowAddMasterModal(false)} title="Добавить мастера">
         <div className="space-y-4">
           <Input label="Имя мастера" placeholder="Анна Иванова"
@@ -1665,7 +1737,6 @@ export default function DashboardPage() {
           <Input label="Специализация" placeholder="Маникюр, педикюр"
             value={masterForm.specialization}
             onChange={e => setMasterForm(f => ({ ...f, specialization: e.target.value }))}/>
-
           <div>
             <label className="text-sm font-medium text-gray-700 block mb-2">
               <Palette size={14} className="inline mr-1"/>Цвет в календаре
