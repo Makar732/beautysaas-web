@@ -161,7 +161,7 @@ export default function LandingPage() {
           </div>
 
           <h1 className="text-4xl sm:text-6xl lg:text-7xl font-black leading-[1.05] tracking-tight mb-6">
-            Автоматизируйте записи.
+            Ваш личный администратор 24/7.
             <br />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-emerald-300">
               Растите выручку.

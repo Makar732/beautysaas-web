@@ -119,9 +119,9 @@ export default function BookingPage() {
   const [createdBooking, setCreatedBooking] = useState<Booking | null>(null);
 
   // ★ НОВОЕ: для тарифа Салон
-  const [salonMasters, setSalonMasters]           = useState<SalonMaster[]>([]);
-  const [selectedMaster, setSelectedMaster]       = useState<SalonMaster | null>(null);
-  const [isSalonBooking, setIsSalonBooking]       = useState(false);
+  const [salonMasters, setSalonMasters]     = useState<SalonMaster[]>([]);
+  const [selectedMaster, setSelectedMaster] = useState<SalonMaster | null>(null);
+  const [isSalonBooking, setIsSalonBooking] = useState(false);
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -209,18 +209,38 @@ export default function BookingPage() {
   const allSlots = getMasterTimeSlots();
   const matrixDates = getMonthMatrix(calendarYear, calendarMonth);
 
+  // ✅ ИСПРАВЛЕНО: фильтруем занятые слоты с учётом salon_master_id
+  // Для соло-мастера логика не изменилась — берём все его записи
+  // Для салона — берём только записи выбранного мастера салона
   const getBlockedSlotsForDate = (dateStr: string): Set<string> => {
     const blocked = new Set<string>();
+
     existingBookings
-      .filter(b => b.date === dateStr && b.status !== 'cancelled')
+      .filter(b => {
+        // Общая проверка даты и статуса — не меняем
+        if (b.date !== dateStr || b.status === 'cancelled') return false;
+
+        // ✅ Для салона: показываем занятость только выбранного мастера
+        if (isSalonBooking && selectedMaster) {
+          return b.salon_master_id === selectedMaster.id;
+        }
+
+        // Для соло: берём все записи как раньше
+        return true;
+      })
       .forEach(b => {
         const service = services.find(s => s.id === b.service_id);
         const duration = service?.duration ?? SLOT_INTERVAL;
-        getOccupiedSlotsByBooking(b.time, duration).forEach(slot => blocked.add(slot));
+        getOccupiedSlotsByBooking(b.time, duration).forEach(
+          slot => blocked.add(slot)
+        );
       });
+
     return blocked;
   };
 
+  // ✅ isSlotBlocked — не меняем сигнатуру, просто вызывает
+  // уже исправленный getBlockedSlotsForDate
   const isSlotBlocked = (time: string, dateStr: string): boolean => {
     if (!selectedService) return false;
     const blockedByExisting = getBlockedSlotsForDate(dateStr);
@@ -332,7 +352,6 @@ export default function BookingPage() {
   const isContactsValid = clientName.trim().length >= 2 && isPhoneComplete(clientPhone);
 
   // Deep link для клиента в Telegram-бота
-  // Префикс appt_ позволяет боту отличить клиентский сценарий от мастерского
   const clientTelegramLink = createdBooking
     ? `https://t.me/${TELEGRAM_BOT_USERNAME}?start=appt_${createdBooking.id}`
     : '';
@@ -473,6 +492,9 @@ export default function BookingPage() {
                   key={sm.id}
                   onClick={() => {
                     setSelectedMaster(sm);
+                    // ✅ Сбрасываем дату и время при смене мастера
+                    setSelectedDate(null);
+                    setSelectedTime(null);
                     setStep('service');
                   }}
                   className="bg-white rounded-3xl border border-gray-200 p-6 text-left
@@ -913,7 +935,6 @@ export default function BookingPage() {
                 rel="noopener noreferrer"
                 className="mt-5 flex items-center justify-center gap-3 bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white font-bold px-6 py-4 rounded-2xl transition-all w-full shadow-md shadow-blue-500/25 text-base"
               >
-                {/* Telegram icon */}
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
                   <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.248l-2.05 9.66c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.913.561z"/>
                 </svg>
