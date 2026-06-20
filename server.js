@@ -16,21 +16,17 @@ app.use(express.json());
 // КОНФИГ
 // ════════════════════════════════════════════════════════════════
 
-// Бот 1: уведомления мастерам о новых записях + webhook /start
 const NOTIFY_BOT_TOKEN = process.env.TELEGRAM_NOTIFY_BOT_TOKEN
-  || process.env.TELEGRAM_BOT_TOKEN  // fallback для обратной совместимости
+  || process.env.TELEGRAM_BOT_TOKEN
   || '';
 
-// Бот 2: саппорт, рассылки от администратора, оплата PRO
 const SUPPORT_BOT_TOKEN = process.env.TELEGRAM_SUPPORT_BOT_TOKEN
-  || process.env.TELEGRAM_BOT_TOKEN  // fallback если один бот
+  || process.env.TELEGRAM_BOT_TOKEN
   || '';
 
 const ADMIN_UUID    = process.env.ADMIN_UUID || '';
 const SUPABASE_URL  = process.env.VITE_SUPABASE_URL || '';
 
-// Для серверных операций используем service_role (обходит RLS).
-// Если не задан — падаем на anon key (менее безопасно).
 const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY
   || process.env.VITE_SUPABASE_ANON_KEY
   || '';
@@ -41,9 +37,6 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 // УТИЛИТЫ
 // ════════════════════════════════════════════════════════════════
 
-/**
- * Проверяет, истёк ли 14-дневный триал.
- */
 function isTrialExpired(trialStartDate) {
   if (!trialStartDate) return false;
   const diffDays = Math.floor(
@@ -52,13 +45,6 @@ function isTrialExpired(trialStartDate) {
   return diffDays >= 14;
 }
 
-/**
- * Базовая функция отправки сообщения через указанного бота.
- * @param {string} botToken  - токен бота
- * @param {string|number} chatId
- * @param {string} text
- * @param {object} extra     - доп. параметры (disable_web_page_preview и т.д.)
- */
 async function sendTelegramMessage(botToken, chatId, text, extra = {}) {
   if (!botToken) {
     console.error('❌ Токен бота не задан');
@@ -90,12 +76,6 @@ async function sendTelegramMessage(botToken, chatId, text, extra = {}) {
   }
 }
 
-/**
- * Проверяет активность подписки мастера по его ID.
- * Premium  → true
- * Триал ≤14 дней → true
- * Иначе → false
- */
 async function isMasterSubscriptionActive(masterId) {
   try {
     const { data, error } = await supabase
@@ -110,7 +90,7 @@ async function isMasterSubscriptionActive(masterId) {
     }
 
     if (data.is_premium) return true;
-    if (!data.trial_start_date) return true; // новый пользователь
+    if (!data.trial_start_date) return true;
 
     const active = !isTrialExpired(data.trial_start_date);
     if (!active) {
@@ -126,9 +106,6 @@ async function isMasterSubscriptionActive(masterId) {
   }
 }
 
-/**
- * Отправляет мастеру уведомление об окончании триала.
- */
 async function sendTrialExpiredNotification(chatId, masterName) {
   const text =
     `⚠️ <b>${masterName}</b>, ваш 14-дневный пробный период BeautySaaS завершён.\n\n` +
@@ -139,13 +116,10 @@ async function sendTrialExpiredNotification(chatId, masterName) {
   return sendTelegramMessage(NOTIFY_BOT_TOKEN, chatId, text);
 }
 
-/**
- * Находит записи на завтра с client_tg_chat_id и рассылает напоминания.
- */
 async function checkAndSendReminders() {
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().split('T')[0]; // YYYY-MM-DD
+  const tomorrowStr = tomorrow.toISOString().split('T')[0];
 
   console.log(`🔔 Напоминания на: ${tomorrowStr}`);
 
@@ -169,7 +143,6 @@ async function checkAndSendReminders() {
 
   console.log(`📨 Записей для напоминания: ${appointments.length}`);
 
-  // Подтягиваем имена мастеров одним запросом
   const masterIds = [...new Set(appointments.map(a => a.master_id))];
   const { data: masters } = await supabase
     .from('profiles')
@@ -210,8 +183,70 @@ async function checkAndSendReminders() {
 }
 
 // ════════════════════════════════════════════════════════════════
+// ПРОКСИ: фронтенд → /supabase-proxy/* → supabase.co
+// Решает проблему блокировки Supabase через ТСПУ/РКН в РФ
+// Логику авторизации и онбординга НЕ затрагивает
+// ════════════════════════════════════════════════════════════════
+app.use('/supabase-proxy', async (req, res) => {
+  const targetBase = (process.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
+
+  if (!targetBase) {
+    console.error('❌ [proxy] VITE_SUPABASE_URL не задан');
+    return res.status(500).json({ error: 'Proxy not configured' });
+  }
+
+  const targetPath = req.originalUrl.replace('/supabase-proxy', '');
+  const targetUrl  = `${targetBase}${targetPath}`;
+
+  console.log(`[proxy] ${req.method} ${targetUrl}`);
+
+  try {
+    const headersToForward = {};
+    const skipHeaders = new Set([
+      'host',
+      'connection',
+      'transfer-encoding',
+      'content-length',
+    ]);
+
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (!skipHeaders.has(key.toLowerCase())) {
+        headersToForward[key] = value;
+      }
+    }
+
+    const hasBody = !['GET', 'HEAD'].includes(req.method.toUpperCase());
+
+    const proxyResponse = await fetch(targetUrl, {
+      method:  req.method,
+      headers: headersToForward,
+      body:    hasBody ? JSON.stringify(req.body) : undefined,
+    });
+
+    res.status(proxyResponse.status);
+
+    const skipResponseHeaders = new Set([
+      'transfer-encoding',
+      'connection',
+    ]);
+
+    for (const [key, value] of proxyResponse.headers.entries()) {
+      if (!skipResponseHeaders.has(key.toLowerCase())) {
+        res.setHeader(key, value);
+      }
+    }
+
+    const responseBody = await proxyResponse.arrayBuffer();
+    res.send(Buffer.from(responseBody));
+
+  } catch (err) {
+    console.error('❌ [proxy] Ошибка проксирования:', err);
+    res.status(502).json({ error: 'Proxy error', detail: String(err) });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════
 // API: Уведомление мастеру о новой записи клиента
-// Блокируется если триал истёк и нет Premium
 // ════════════════════════════════════════════════════════════════
 app.post('/api/send-notification', async (req, res) => {
   const { telegram_id, booking } = req.body;
@@ -220,7 +255,6 @@ app.post('/api/send-notification', async (req, res) => {
     return res.status(400).json({ error: 'Missing telegram_id or booking data' });
   }
 
-  // Проверяем подписку мастера
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('is_premium, trial_start_date, name, id')
@@ -233,12 +267,10 @@ app.post('/api/send-notification', async (req, res) => {
 
     if (!isPremium && trialExpired) {
       console.log(`🔒 Уведомление заблокировано для ${profile.name}: триал истёк`);
-      // Тихий успех — клиент не знает о блокировке
       return res.json({ success: true, blocked: true, reason: 'trial_expired' });
     }
   }
 
-  // Если профиль не найден по telegram_id — проверяем по master_id
   if ((profileError || !profile) && booking?.master_id) {
     const canNotify = await isMasterSubscriptionActive(booking.master_id);
     if (!canNotify) {
@@ -264,8 +296,6 @@ app.post('/api/send-notification', async (req, res) => {
 
 // ════════════════════════════════════════════════════════════════
 // API: Рассылка от администратора
-// НЕ блокируется по подписке — только проверка admin_id
-// Использует SUPPORT_BOT_TOKEN
 // ════════════════════════════════════════════════════════════════
 app.post('/api/broadcast', async (req, res) => {
   const { admin_id, message, targets } = req.body;
@@ -289,7 +319,6 @@ app.post('/api/broadcast', async (req, res) => {
     const chatId = String(target.telegram_id || '').trim();
     if (!chatId) continue;
 
-    // Broadcast использует HTML (как и весь проект), не Markdown
     const text =
       `📢 <b>Объявление от BeautySaaS</b>\n\n${message}`;
 
@@ -307,7 +336,6 @@ app.post('/api/broadcast', async (req, res) => {
 
 // ════════════════════════════════════════════════════════════════
 // API: Уведомление мастера САЛОНА о новой записи
-// Директор добавил запись → мастер получает уведомление в Telegram
 // ════════════════════════════════════════════════════════════════
 app.post('/api/notify-salon-master', async (req, res) => {
   const { salon_master_id, booking } = req.body;
@@ -316,7 +344,6 @@ app.post('/api/notify-salon-master', async (req, res) => {
     return res.status(400).json({ error: 'Missing salon_master_id or booking' });
   }
 
-  // Получаем данные мастера салона из БД
   const { data: salonMaster, error } = await supabase
     .from('salon_masters')
     .select('id, name, telegram_chat_id, director_id')
@@ -328,13 +355,11 @@ app.post('/api/notify-salon-master', async (req, res) => {
     return res.status(404).json({ error: 'Salon master not found' });
   }
 
-  // Нет Telegram — тихий успех
   if (!salonMaster.telegram_chat_id) {
     console.log(`[notify-salon-master] У мастера ${salonMaster.name} нет Telegram`);
     return res.json({ success: true, skipped: true, reason: 'no_telegram' });
   }
 
-  // Проверяем подписку директора
   const canNotify = await isMasterSubscriptionActive(salonMaster.director_id);
   if (!canNotify) {
     console.log(`[notify-salon-master] Директор ${salonMaster.director_id} — подписка истекла`);
@@ -416,10 +441,8 @@ app.post('/api/check-trial-expiry', async (req, res) => {
 
 // ════════════════════════════════════════════════════════════════
 // WEBHOOK: Бот уведомлений (NOTIFY_BOT_TOKEN)
-// Обрабатывает /start для мастеров и клиентов
 // ════════════════════════════════════════════════════════════════
 app.post('/webhook/telegram', async (req, res) => {
-  // Отвечаем Telegram сразу — не ждём обработки
   res.sendStatus(200);
 
   try {
@@ -433,7 +456,6 @@ app.post('/webhook/telegram', async (req, res) => {
     console.log(`📩 [notify-bot] chat_id=${chatId}: ${text}`);
 
     if (!text.startsWith('/start')) {
-      // Любые другие сообщения — направляем в саппорт
       await sendTelegramMessage(
         NOTIFY_BOT_TOKEN, chatId,
         `ℹ️ Этот бот предназначен только для уведомлений о записях.\n\n` +
@@ -445,9 +467,7 @@ app.post('/webhook/telegram', async (req, res) => {
     const parts = text.split(' ');
     const param = parts[1]?.trim() || '';
 
-    // ──────────────────────────────────────────────────────────
-    // КЛИЕНТСКИЙ СЦЕНАРИЙ: /start appt_<bookingId>
-    // ──────────────────────────────────────────────────────────
+    // ── КЛИЕНТСКИЙ СЦЕНАРИЙ: /start appt_<bookingId> ──────────
     if (param.startsWith('appt_')) {
       const bookingId = param.replace('appt_', '');
       console.log(`🎯 Клиент, booking: ${bookingId}`);
@@ -511,15 +531,11 @@ app.post('/webhook/telegram', async (req, res) => {
       return;
     }
 
-    // ──────────────────────────────────────────────────────────
-    // СЦЕНАРИЙ МАСТЕРА САЛОНА: /start sm_<directorId>_<token>
-    // Мастер переходит по ссылке-приглашению от директора
-    // ──────────────────────────────────────────────────────────
+    // ── СЦЕНАРИЙ МАСТЕРА САЛОНА: /start sm_<...> ──────────────
     if (param && param.startsWith('sm_')) {
       const linkCode = param;
       console.log(`🎯 Онбординг мастера салона, link_code: ${linkCode}`);
 
-      // Ищем мастера по link_code
       const { data: salonMaster, error: smError } = await supabase
         .from('salon_masters')
         .select('id, name, director_id, telegram_chat_id, link_code')
@@ -536,7 +552,6 @@ app.post('/webhook/telegram', async (req, res) => {
         return;
       }
 
-      // Уже привязан?
       if (salonMaster.telegram_chat_id &&
           salonMaster.telegram_chat_id === String(chatId)) {
         await sendTelegramMessage(
@@ -547,7 +562,6 @@ app.post('/webhook/telegram', async (req, res) => {
         return;
       }
 
-      // Привязываем telegram_chat_id
       const { error: updateError } = await supabase
         .from('salon_masters')
         .update({ telegram_chat_id: String(chatId) })
@@ -562,7 +576,6 @@ app.post('/webhook/telegram', async (req, res) => {
         return;
       }
 
-      // Получаем имя директора для сообщения
       const { data: director } = await supabase
         .from('profiles')
         .select('name')
@@ -587,9 +600,7 @@ app.post('/webhook/telegram', async (req, res) => {
       return;
     }
 
-    // ──────────────────────────────────────────────────────────
-    // МАСТЕРСКИЙ СЦЕНАРИЙ: /start <masterId> (владелец аккаунта)
-    // ──────────────────────────────────────────────────────────
+    // ── МАСТЕРСКИЙ СЦЕНАРИЙ: /start <masterId> ────────────────
     if (param && !param.startsWith('appt_')) {
       const masterId = param;
       console.log(`🔧 Мастер-владелец, id: ${masterId}`);
@@ -650,13 +661,10 @@ app.post('/webhook/telegram', async (req, res) => {
       return;
     }
 
-    // ──────────────────────────────────────────────────────────
-    // /start без параметра
-    // ──────────────────────────────────────────────────────────
+    // ── /start без параметра ───────────────────────────────────
     if (!param) {
       console.log(`👤 /start без параметра, chat_id=${chatId}`);
 
-      // Проверяем: уже подключённый мастер?
       const { data: existingMaster } = await supabase
         .from('profiles')
         .select('id, name')
@@ -685,15 +693,15 @@ app.post('/webhook/telegram', async (req, res) => {
     console.error('❌ Ошибка в webhook/telegram:', err);
   }
 });
+
 // ════════════════════════════════════════════════════════════════
 // WEBHOOK: Бот поддержки (SUPPORT_BOT_TOKEN)
-// Принимает сообщения мастеров и чеки об оплате
-// ════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════
 app.post('/webhook/support', async (req, res) => {
-  // Отвечаем Telegram сразу — не ждём обработки
   res.sendStatus(200);
   await handleSupportUpdate(req.body);
 });
+
 // ════════════════════════════════════════════════════════════════
 // СТАТИКА
 // ════════════════════════════════════════════════════════════════
@@ -745,7 +753,6 @@ app.listen(PORT, async () => {
     console.error('❌ Ошибка при установке webhook:', err);
   }
 
-  // ── Webhook бота поддержки (НОВОЕ) ────────────────────────────
   if (RAILWAY_URL) {
     await registerSupportBotWebhook(`https://${RAILWAY_URL}`);
   }
