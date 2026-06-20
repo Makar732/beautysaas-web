@@ -1,63 +1,56 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// ─────────────────────────────────────────────────────────────
-// Оригинальные данные Supabase
-// ─────────────────────────────────────────────────────────────
-const supabaseUrl: string     = import.meta.env.VITE_SUPABASE_URL;
+const supabaseUrl: string = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey: string = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// ─────────────────────────────────────────────────────────────
-// URL прокси — со слэшем в конце чтобы SDK правильно строил пути
-// https://beautysaas-crm.ru/proxy/supabase/ + rest/v1/profiles
-// ─────────────────────────────────────────────────────────────
-const appUrl: string =
-  import.meta.env.VITE_APP_URL || window.location.origin;
-
-// ⚠️ ВАЖНО: слэш в конце обязателен!
-const proxyRestUrl = `${appUrl}/proxy/supabase/`;
-
-// ─────────────────────────────────────────────────────────────
-// ВАЛИДАЦИЯ
-// ─────────────────────────────────────────────────────────────
 if (!supabaseUrl || supabaseUrl === 'undefined') {
   console.error('❌ VITE_SUPABASE_URL не задан!');
 }
+
 if (!supabaseAnonKey || supabaseAnonKey === 'undefined') {
   console.error('❌ VITE_SUPABASE_ANON_KEY не задан!');
 }
 
 // ─────────────────────────────────────────────────────────────
-// SUPABASE КЛИЕНТ
+// ПРОКСИ ДЛЯ РФ: в продакшене все запросы идут через Railway
+// (/supabase-proxy → supabase.co). В dev — напрямую.
+// Логика авторизации, OAuth (VK, Yandex), онбординг — НЕ ТРОГАЕМ.
 // ─────────────────────────────────────────────────────────────
+const clientUrl: string = import.meta.env.DEV
+  ? supabaseUrl
+  : '/supabase-proxy';
+
 export const supabase: SupabaseClient = createClient(
-  proxyRestUrl,
+  clientUrl,
   supabaseAnonKey,
   {
     auth: {
-      persistSession:   true,
+      persistSession: true,
       autoRefreshToken: true,
     },
   }
 );
 
-// ─────────────────────────────────────────────────────────────
-// ДИАГНОСТИКА (только локально)
-// ─────────────────────────────────────────────────────────────
-if (import.meta.env.DEV) {
-  console.log('🔧 Режим: Supabase Proxy');
-  console.log('📡 Proxy URL:', proxyRestUrl);
+async function testSupabaseConnection(): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('profiles')
+      .select('id')
+      .limit(1);
 
-  supabase
-    .from('profiles')
-    .select('id')
-    .limit(1)
-    .then(({ data, error }) => {
-      if (error && error.code !== 'PGRST116') {
-        console.warn('⚠️ Proxy тест не прошёл:', error.message);
-      } else {
-        console.log('✅ Proxy работает! data:', data);
-      }
-    });
+    if (error && error.code !== 'PGRST116') {
+      console.warn('⚠️ Supabase ответил с ошибкой:', error.message);
+    } else {
+      console.log('✅ Успешное подключение к Supabase!');
+      console.log('📡 URL:', clientUrl);
+    }
+  } catch (err) {
+    console.error('❌ Не удалось подключиться к Supabase:', err);
+  }
+}
+
+if (import.meta.env.DEV) {
+  testSupabaseConnection();
 }
 
 export default supabase;
