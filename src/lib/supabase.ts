@@ -53,4 +53,4 @@ if (import.meta.env.DEV) {
   testSupabaseConnection();
 }
 
-export default supabase;
+export default supabase; 
