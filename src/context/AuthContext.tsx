@@ -77,36 +77,42 @@ function isProfileComplete(master: { name?: string | null; phone?: string | null
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // ─────────────────────────────────────────────────────────────
-// ★ НОВЫЙ ХЕЛПЕР: getMasterById с повторными попытками
-// Если прокси ещё не готов или сеть временно упала —
-// пробуем 3 раза с паузой 1.5 сек между попытками
+// ★ МЕСТО 1: getMasterById с повторными попытками
 // ─────────────────────────────────────────────────────────────
 async function getMasterByIdWithRetry(
   id: string,
-  attempts = 3,
-  delayMs  = 1500,
+  attempts = 4,
+  delayMs  = 2000,
 ) {
   for (let i = 0; i < attempts; i++) {
     try {
       console.log(`🔄 getMasterById попытка ${i + 1}/${attempts} для id: ${id}`);
+
+      // ★ Перед каждой попыткой проверяем что сессия реально есть
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        console.warn(`⏳ Сессия ещё не готова (попытка ${i + 1}), ждём...`);
+        await sleep(delayMs);
+        continue;
+      }
+
       const profile = await getMasterById(id);
       if (profile) {
         console.log('✅ Профиль найден:', profile.name);
         return profile;
       }
-      // profile === null (не ошибка, а просто не найден)
       console.warn(`⚠️ Профиль не найден (попытка ${i + 1})`);
+
     } catch (err) {
       console.error(`❌ Ошибка попытки ${i + 1}:`, err);
     }
 
-    // Ждём перед следующей попыткой (кроме последней)
     if (i < attempts - 1) {
-      console.log(`⏳ Ждём ${delayMs}мс перед следующей попыткой...`);
+      console.log(`⏳ Ждём ${delayMs}мс...`);
       await sleep(delayMs);
     }
   }
-  return null; // Все попытки исчерпаны
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -123,6 +129,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const handleSignedIn = useCallback(
     async (authUserId: string, authUserEmail: string) => {
       console.log('🔐 handleSignedIn вызван для:', authUserId);
+      // ★ МЕСТО 3: Даём время сессии полностью установиться
+      // Особенно важно после fresh login (не TOKEN_REFRESHED)
+      await sleep(300);
 
       // ★ ШАГ 1: Проверяем localStorage — может профиль уже есть локально
       // Это спасает от мигания экрана онбординга при перезагрузке
@@ -162,7 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // ★ ШАГ 2: localStorage пустой или чужой — грузим из БД с retry
       try {
-        const profile = await getMasterByIdWithRetry(authUserId, 3, 1500);
+        const profile = await getMasterByIdWithRetry(authUserId, 4, 2000);
 
         if (profile && isProfileComplete(profile)) {
           // ✅ Профиль найден и заполнен → в дашборд
@@ -198,7 +207,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         } else {
           // ❌ Профиль не найден совсем (новый пользователь) → онбординг
-          console.warn('❌ Профиль не найден после 3 попыток — онбординг');
+          console.warn('❌ Профиль не найден после всех попыток — онбординг');
           sessionStorage.setItem('pending_user_id',    authUserId);
           sessionStorage.setItem('pending_user_email', authUserEmail);
           setUser(null);
@@ -275,13 +284,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, [handleSignedIn]);
 
-  // ── Вход ──────────────────────────────────────────────────
+  // ── МЕСТО 2: Вход ──────────────────────────────────────────
   const loginWithEmail = async (
     email: string,
     password: string,
   ): Promise<{ error: string | null }> => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error: error ? error.message : null };
+    
+    const { data, error } = await supabase.auth.signInWithPassword({ 
+      email, 
+      password 
+    });
+    
+    if (error) return { error: error.message };
+
+    // ★ КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ:
+    // Ждём чуть-чуть чтобы сессия успела записаться
+    // прежде чем onAuthStateChange триггернёт handleSignedIn
+    // и тот попытается читать профиль из БД
+    if (data.session) {
+      await sleep(500);
+    }
+
+    return { error: null };
   };
 
   // ── Регистрация ────────────────────────────────────────────
