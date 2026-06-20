@@ -322,11 +322,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: null };
   };
 
-  // ── Онбординг ─────────────────────────────────────────────
+  // ── ШАГ 1: Онбординг (ИСПРАВЛЕНО) ──────────────────────────
   const completeOnboarding = async (name: string, phone: string): Promise<void> => {
-    const userId         = sessionStorage.getItem('pending_user_id') || `master-${Date.now()}`;
-    const slug           = generateSlug(name);
+    // ★ КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ:
+    // Берём ID из сессии Supabase Auth, а не генерируем новый!
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session?.user) {
+      console.error('❌ Нет активной сессии при онбординге!');
+      throw new Error('No active session');
+    }
+
+    const userId = session.user.id; // ← auth.uid() из Supabase
+    const slug   = generateSlug(name);
     const trialStartDate = new Date().toISOString();
+
+    console.log('💾 Создаём профиль с ID:', userId);
 
     const newUser: AppUser = {
       id:                userId,
@@ -346,7 +357,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     await upsertMaster({
-      id:                newUser.id,
+      id:                userId,
       name:              newUser.name,
       slug:              newUser.slug,
       phone:             newUser.phone,
@@ -367,6 +378,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setNeedsOnboarding(false);
     sessionStorage.removeItem('pending_user_id');
     sessionStorage.removeItem('pending_user_email');
+    
+    console.log('✅ Профиль создан и сохранён');
   };
 
   // ── Выход ─────────────────────────────────────────────────
