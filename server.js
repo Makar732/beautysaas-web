@@ -695,6 +695,99 @@ app.post('/webhook/support', async (req, res) => {
   await handleSupportUpdate(req.body);
 });
 // ════════════════════════════════════════════════════════════════
+// PROXY: Supabase REST (обход блокировок ТСПУ/РКН)
+// ════════════════════════════════════════════════════════════════
+
+app.all('/proxy/supabase/*', async (req, res) => {
+  const subPath     = req.path.replace('/proxy/supabase', '');
+  const queryString = new URLSearchParams(req.query).toString();
+  const targetUrl   = `${SUPABASE_URL}${subPath}${queryString ? '?' + queryString : ''}`;
+
+  console.log(`[Proxy] ${req.method} ${targetUrl}`);
+
+  try {
+    const headers = {
+      'Content-Type':  'application/json',
+      'apikey':        SUPABASE_KEY,
+      'Authorization': req.headers['authorization'] || `Bearer ${SUPABASE_KEY}`,
+    };
+
+    // Пробрасываем Supabase-специфичные заголовки
+    const forward = [
+      'prefer', 'range', 'content-profile',
+      'accept-profile', 'x-client-info', 'x-supabase-api-version',
+    ];
+    forward.forEach(h => {
+      if (req.headers[h]) headers[h] = req.headers[h];
+    });
+
+    const fetchOptions = { method: req.method, headers };
+
+    if (['POST','PATCH','PUT','DELETE'].includes(req.method) && req.body) {
+      fetchOptions.body = JSON.stringify(req.body);
+    }
+
+    const upstream = await fetch(targetUrl, fetchOptions);
+
+    res.status(upstream.status);
+
+    const ct = upstream.headers.get('content-type');
+    if (ct) res.setHeader('Content-Type', ct);
+
+    const cr = upstream.headers.get('content-range');
+    if (cr) res.setHeader('Content-Range', cr);
+
+    res.send(await upstream.text());
+
+  } catch (err) {
+    console.error('[Proxy] Ошибка:', err.message);
+    res.status(502).json({ error: 'Proxy error', message: err.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════
+// PROXY: Supabase Auth (/auth/v1/*)
+// ════════════════════════════════════════════════════════════════
+
+app.all('/proxy/supabase-auth/*', async (req, res) => {
+  const subPath     = req.path.replace('/proxy/supabase-auth', '');
+  const queryString = new URLSearchParams(req.query).toString();
+  const targetUrl   = `${SUPABASE_URL}${subPath}${queryString ? '?' + queryString : ''}`;
+
+  console.log(`[Proxy Auth] ${req.method} ${targetUrl}`);
+
+  try {
+    const headers = {
+      'Content-Type': 'application/json',
+      'apikey':       SUPABASE_KEY,
+    };
+
+    if (req.headers['authorization']) {
+      headers['Authorization'] = req.headers['authorization'];
+    }
+
+    const fetchOptions = { method: req.method, headers };
+
+    if (['POST','PATCH','PUT'].includes(req.method) && req.body) {
+      fetchOptions.body = JSON.stringify(req.body);
+    }
+
+    const upstream = await fetch(targetUrl, fetchOptions);
+
+    res.status(upstream.status);
+
+    const ct = upstream.headers.get('content-type');
+    if (ct) res.setHeader('Content-Type', ct);
+
+    res.send(await upstream.text());
+
+  } catch (err) {
+    console.error('[Proxy Auth] Ошибка:', err.message);
+    res.status(502).json({ error: 'Auth proxy error', message: err.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════
 // СТАТИКА
 // ════════════════════════════════════════════════════════════════
 app.use(express.static(path.join(__dirname, 'dist')));
