@@ -26,16 +26,12 @@ interface AuthContextType {
   isAuthenticated: boolean;
   needsOnboarding: boolean;
   isLoading: boolean;
-
-  // Подписка
   isPremium: boolean;
   isTrialActive: boolean;
   trialDaysLeft: number;
-  planType: 'solo' | 'salon';           // ★ НОВОЕ
-  premiumDaysLeft: number;              // ★ НОВОЕ
-  premiumExpiresAt: string | null;      // ★ НОВОЕ
-
-  // Методы
+  planType: 'solo' | 'salon';
+  premiumDaysLeft: number;
+  premiumExpiresAt: string | null;
   loginWithEmail: (email: string, password: string) => Promise<{ error: string | null }>;
   registerWithEmail: (email: string, password: string) => Promise<{ error: string | null }>;
   completeOnboarding: (name: string, phone: string) => Promise<void>;
@@ -46,49 +42,71 @@ interface AuthContextType {
 // ─────────────────────────────────────────────────────────────
 // ХЕЛПЕРЫ
 // ─────────────────────────────────────────────────────────────
-
-/** Считает дни триала */
-function checkTrial(trialStartDate?: string): {
-  isActive: boolean;
-  daysLeft: number;
-} {
+function checkTrial(trialStartDate?: string): { isActive: boolean; daysLeft: number } {
   if (!trialStartDate) return { isActive: true, daysLeft: 14 };
-  const start = new Date(trialStartDate);
-  const now = new Date();
   const diffDays = Math.floor(
-    (now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)
+    (Date.now() - new Date(trialStartDate).getTime()) / (1000 * 60 * 60 * 24)
   );
   const daysLeft = Math.max(0, 14 - diffDays);
   return { isActive: daysLeft > 0, daysLeft };
 }
 
-/** Считает дни до окончания PRO-подписки */
-function checkPremiumExpiry(premiumExpiresAt?: string | null): {
-  daysLeft: number;
-} {
+function checkPremiumExpiry(premiumExpiresAt?: string | null): { daysLeft: number } {
   if (!premiumExpiresAt) return { daysLeft: 0 };
   const target = new Date(premiumExpiresAt);
-  const now = new Date();
+  const now    = new Date();
   target.setHours(0, 0, 0, 0);
   now.setHours(0, 0, 0, 0);
-  const days = Math.max(
-    0,
-    Math.round((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-  );
-  return { daysLeft: days };
+  return {
+    daysLeft: Math.max(
+      0,
+      Math.round((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+    ),
+  };
 }
 
-/** Проверяет полноту профиля */
-function isProfileComplete(master: {
-  name?: string | null;
-  phone?: string | null;
-}): boolean {
-  const hasName =
-    typeof master.name === 'string' && master.name.trim().length >= 2;
-  const hasPhone =
-    typeof master.phone === 'string' &&
-    master.phone.replace(/\D/g, '').length >= 10;
+function isProfileComplete(master: { name?: string | null; phone?: string | null }): boolean {
+  const hasName  = typeof master.name  === 'string' && master.name.trim().length  >= 2;
+  const hasPhone = typeof master.phone === 'string' && master.phone.replace(/\D/g, '').length >= 10;
   return hasName && hasPhone;
+}
+
+// ─────────────────────────────────────────────────────────────
+// ★ НОВЫЙ ХЕЛПЕР: пауза между попытками
+// ─────────────────────────────────────────────────────────────
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// ─────────────────────────────────────────────────────────────
+// ★ НОВЫЙ ХЕЛПЕР: getMasterById с повторными попытками
+// Если прокси ещё не готов или сеть временно упала —
+// пробуем 3 раза с паузой 1.5 сек между попытками
+// ─────────────────────────────────────────────────────────────
+async function getMasterByIdWithRetry(
+  id: string,
+  attempts = 3,
+  delayMs  = 1500,
+) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      console.log(`🔄 getMasterById попытка ${i + 1}/${attempts} для id: ${id}`);
+      const profile = await getMasterById(id);
+      if (profile) {
+        console.log('✅ Профиль найден:', profile.name);
+        return profile;
+      }
+      // profile === null (не ошибка, а просто не найден)
+      console.warn(`⚠️ Профиль не найден (попытка ${i + 1})`);
+    } catch (err) {
+      console.error(`❌ Ошибка попытки ${i + 1}:`, err);
+    }
+
+    // Ждём перед следующей попыткой (кроме последней)
+    if (i < attempts - 1) {
+      console.log(`⏳ Ждём ${delayMs}мс перед следующей попыткой...`);
+      await sleep(delayMs);
+    }
+  }
+  return null; // Все попытки исчерпаны
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -97,50 +115,111 @@ function isProfileComplete(master: {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AppUser | null>(null);
-  const [needsOnboarding, setNeedsOnboarding] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [user,             setUser]             = useState<AppUser | null>(null);
+  const [needsOnboarding,  setNeedsOnboarding]  = useState(false);
+  const [isLoading,        setIsLoading]        = useState(true);
 
   // ── После успешного входа ──────────────────────────────────
   const handleSignedIn = useCallback(
     async (authUserId: string, authUserEmail: string) => {
+      console.log('🔐 handleSignedIn вызван для:', authUserId);
+
+      // ★ ШАГ 1: Проверяем localStorage — может профиль уже есть локально
+      // Это спасает от мигания экрана онбординга при перезагрузке
+      const savedUser = getUser();
+      if (savedUser && savedUser.id === authUserId && isProfileComplete(savedUser)) {
+        console.log('💾 Профиль найден в localStorage, используем его');
+        setUser(savedUser);
+        setNeedsOnboarding(false);
+        setIsLoading(false);
+
+        // Фоново обновляем из БД (без блокировки UI)
+        getMasterByIdWithRetry(authUserId).then(freshProfile => {
+          if (freshProfile && isProfileComplete(freshProfile)) {
+            const refreshed: AppUser = {
+              ...savedUser,
+              name:              freshProfile.name!,
+              phone:             freshProfile.phone!,
+              slug:              freshProfile.slug,
+              telegram_chat_id:  freshProfile.telegram_chat_id  || '',
+              telegram_bot_token:freshProfile.telegram_bot_token || '',
+              telegram_id:       freshProfile.telegram_id       || '',
+              trial_start_date:  freshProfile.trial_start_date,
+              is_premium:        freshProfile.is_premium        || false,
+              plan_type:         freshProfile.plan_type         || 'solo',
+              premium_expires_at:freshProfile.premium_expires_at ?? null,
+              workingHours:      freshProfile.workingHours      || { start: '09:00', end: '21:00' },
+              daysOff:           freshProfile.daysOff           || [],
+            };
+            saveUser(refreshed);
+            setUser(refreshed);
+            console.log('🔄 Профиль обновлён из БД в фоне');
+          }
+        });
+
+        return; // ← Выходим, UI уже показан
+      }
+
+      // ★ ШАГ 2: localStorage пустой или чужой — грузим из БД с retry
       try {
-        const profile = await getMasterById(authUserId);
+        const profile = await getMasterByIdWithRetry(authUserId, 3, 1500);
 
         if (profile && isProfileComplete(profile)) {
+          // ✅ Профиль найден и заполнен → в дашборд
           const appUser: AppUser = {
-            id: profile.id,
-            name: profile.name!,
-            phone: profile.phone!,
-            slug: profile.slug,
-            isGuest: false,
-            telegram_chat_id:   profile.telegram_chat_id   || '',
-            telegram_bot_token: profile.telegram_bot_token || '',
-            telegram_id:        profile.telegram_id        || '',
-            trial_start_date:   profile.trial_start_date,
-            is_premium:         profile.is_premium || false,
-
-            // ★ НОВОЕ
-            plan_type:           profile.plan_type           || 'solo',
-            premium_expires_at:  profile.premium_expires_at  ?? null,
-
-            workingHours: profile.workingHours || { start: '09:00', end: '21:00' },
-            daysOff:      profile.daysOff      || [],
+            id:                profile.id,
+            name:              profile.name!,
+            phone:             profile.phone!,
+            slug:              profile.slug,
+            isGuest:           false,
+            telegram_chat_id:  profile.telegram_chat_id  || '',
+            telegram_bot_token:profile.telegram_bot_token || '',
+            telegram_id:       profile.telegram_id       || '',
+            trial_start_date:  profile.trial_start_date,
+            is_premium:        profile.is_premium        || false,
+            plan_type:         profile.plan_type         || 'solo',
+            premium_expires_at:profile.premium_expires_at ?? null,
+            workingHours:      profile.workingHours      || { start: '09:00', end: '21:00' },
+            daysOff:           profile.daysOff           || [],
           };
 
           saveUser(appUser);
           setUser(appUser);
           setNeedsOnboarding(false);
+          console.log('✅ Пользователь авторизован:', appUser.name);
+
+        } else if (profile && !isProfileComplete(profile)) {
+          // ⚠️ Профиль есть но не заполнен (нет имени/телефона) → онбординг
+          console.warn('⚠️ Профиль не заполнен — онбординг');
+          sessionStorage.setItem('pending_user_id',    authUserId);
+          sessionStorage.setItem('pending_user_email', authUserEmail);
+          setUser(null);
+          setNeedsOnboarding(true);
+
         } else {
+          // ❌ Профиль не найден совсем (новый пользователь) → онбординг
+          console.warn('❌ Профиль не найден после 3 попыток — онбординг');
           sessionStorage.setItem('pending_user_id',    authUserId);
           sessionStorage.setItem('pending_user_email', authUserEmail);
           setUser(null);
           setNeedsOnboarding(true);
         }
+
       } catch (err) {
-        console.error('❌ Ошибка в handleSignedIn:', err);
-        setUser(null);
-        setNeedsOnboarding(true);
+        // ★ КРИТИЧНО: при любой ошибке НЕ отправляем на онбординг
+        // если есть сохранённый пользователь — используем его
+        console.error('❌ Критическая ошибка handleSignedIn:', err);
+
+        const fallback = getUser();
+        if (fallback && fallback.id === authUserId && isProfileComplete(fallback)) {
+          console.log('🆘 Fallback: используем localStorage после ошибки');
+          setUser(fallback);
+          setNeedsOnboarding(false);
+        } else {
+          sessionStorage.setItem('pending_user_id',    authUserId);
+          sessionStorage.setItem('pending_user_email', authUserEmail);
+          setNeedsOnboarding(true);
+        }
       } finally {
         setIsLoading(false);
       }
@@ -152,16 +231,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     initStorage();
 
+    // ★ Сначала показываем сохранённого пользователя из localStorage
+    // чтобы не было мигания онбординга при перезагрузке
     const savedUser = getUser();
     if (savedUser && isProfileComplete(savedUser)) {
+      console.log('💾 Быстрая загрузка из localStorage:', savedUser.name);
       setUser(savedUser);
       setNeedsOnboarding(false);
+      // isLoading остаётся true — ждём подтверждения сессии
     }
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
+        console.log('🔑 Сессия найдена:', session.user.id);
         await handleSignedIn(session.user.id, session.user.email || '');
       } else {
+        console.log('🔑 Сессия не найдена — выход');
         clearUser();
         setUser(null);
         setNeedsOnboarding(false);
@@ -171,6 +256,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } =
       supabase.auth.onAuthStateChange(async (event, session) => {
+        console.log('🔔 Auth event:', event);
         if (
           (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') &&
           session?.user
@@ -192,7 +278,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ── Вход ──────────────────────────────────────────────────
   const loginWithEmail = async (
     email: string,
-    password: string
+    password: string,
   ): Promise<{ error: string | null }> => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     return { error: error ? error.message : null };
@@ -201,7 +287,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ── Регистрация ────────────────────────────────────────────
   const registerWithEmail = async (
     email: string,
-    password: string
+    password: string,
   ): Promise<{ error: string | null }> => {
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) return { error: error.message };
@@ -213,33 +299,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   // ── Онбординг ─────────────────────────────────────────────
-  const completeOnboarding = async (
-    name: string,
-    phone: string
-  ): Promise<void> => {
-    const userId =
-      sessionStorage.getItem('pending_user_id') || `master-${Date.now()}`;
+  const completeOnboarding = async (name: string, phone: string): Promise<void> => {
+    const userId         = sessionStorage.getItem('pending_user_id') || `master-${Date.now()}`;
     const slug           = generateSlug(name);
     const trialStartDate = new Date().toISOString();
 
     const newUser: AppUser = {
-      id:    userId,
-      name:  name.trim(),
-      phone: phone.trim(),
+      id:                userId,
+      name:              name.trim(),
+      phone:             phone.trim(),
       slug,
-      isGuest:            false,
-      telegram_chat_id:   '',
-      telegram_bot_token: '',
-      telegram_id:        '',
-      trial_start_date:   trialStartDate,
-      is_premium:         false,
-
-      // ★ НОВОЕ — новый пользователь по умолчанию solo
-      plan_type:          'solo',
-      premium_expires_at: null,
-
-      workingHours: { start: '09:00', end: '21:00' },
-      daysOff:      [],
+      isGuest:           false,
+      telegram_chat_id:  '',
+      telegram_bot_token:'',
+      telegram_id:       '',
+      trial_start_date:  trialStartDate,
+      is_premium:        false,
+      plan_type:         'solo',
+      premium_expires_at:null,
+      workingHours:      { start: '09:00', end: '21:00' },
+      daysOff:           [],
     };
 
     await upsertMaster({
@@ -253,7 +332,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       trial_start_date:  trialStartDate,
       is_premium:        false,
       plan_type:         'solo',
-      premium_expires_at: null,
+      premium_expires_at:null,
       working_hours:     newUser.workingHours,
       days_off:          newUser.daysOff,
       created_at:        new Date().toISOString(),
@@ -262,7 +341,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     saveUser(newUser);
     setUser(newUser);
     setNeedsOnboarding(false);
-
     sessionStorage.removeItem('pending_user_id');
     sessionStorage.removeItem('pending_user_email');
   };
@@ -291,31 +369,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(updated);
   };
 
-  // ── Вычисляемые значения подписки ────────────────────────
+  // ── Подписка ──────────────────────────────────────────────
   const { isActive: isTrialActive, daysLeft: trialDaysLeft } =
     checkTrial(user?.trial_start_date);
+  const isPremium                         = user?.is_premium        || false;
+  const planType                          = user?.plan_type         || 'solo';
+  const premiumExpiresAt                  = user?.premium_expires_at ?? null;
+  const { daysLeft: premiumDaysLeft }     = checkPremiumExpiry(premiumExpiresAt);
 
-  const isPremium = user?.is_premium || false;
-
-  // ★ НОВОЕ
-  const planType          = user?.plan_type          || 'solo';
-  const premiumExpiresAt  = user?.premium_expires_at ?? null;
-  const { daysLeft: premiumDaysLeft } = checkPremiumExpiry(premiumExpiresAt);
-
-  // ─────────────────────────────────────────────────────────
   return (
     <AuthContext.Provider
       value={{
         user,
-        isAuthenticated:  !!user && !needsOnboarding,
+        isAuthenticated: !!user && !needsOnboarding,
         needsOnboarding,
         isLoading,
         isPremium,
         isTrialActive,
         trialDaysLeft,
-        planType,           // ★
-        premiumDaysLeft,    // ★
-        premiumExpiresAt,   // ★
+        planType,
+        premiumDaysLeft,
+        premiumExpiresAt,
         loginWithEmail,
         registerWithEmail,
         completeOnboarding,
