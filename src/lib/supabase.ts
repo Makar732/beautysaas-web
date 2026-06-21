@@ -16,7 +16,7 @@ const REAL_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseAnonKey   = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 // Прокси-URL: относительный путь → всегда на том же домене что и сайт
-const PROXY_URL = '/api/supabase';
+const PROXY_URL = `${window.location.origin}/api/supabase`;
 
 if (!REAL_SUPABASE_URL || REAL_SUPABASE_URL === 'undefined') {
   console.error('❌ VITE_SUPABASE_URL не задан!');
