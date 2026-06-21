@@ -377,12 +377,10 @@ app.post('/api/send-reminders', async (req, res) => {
 app.post('/api/sync-users', async (req, res) => {
   const { admin_id } = req.body;
 
-  // Проверяем что запрос от администратора
   if (!ADMIN_UUID || admin_id !== ADMIN_UUID) {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
-  // Для listUsers нужен service_role — проверяем что он есть
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return res.status(500).json({
       error: 'SUPABASE_SERVICE_ROLE_KEY не задан на сервере. Добавьте его в Railway Variables.',
@@ -390,7 +388,7 @@ app.post('/api/sync-users', async (req, res) => {
   }
 
   try {
-    // Шаг 1: получаем всех пользователей из auth
+    // Шаг 1: все пользователи из auth
     const { data: authData, error: authError } = await supabase.auth.admin.listUsers({
       perPage: 1000,
     });
@@ -407,10 +405,10 @@ app.post('/api/sync-users', async (req, res) => {
       return res.json({ created: 0, total: 0, skipped: 0, details: [] });
     }
 
-    // Шаг 2: получаем все существующие profiles
+    // Шаг 2: все существующие profiles — только поле id
     const { data: existingProfiles, error: profilesError } = await supabase
       .from('profiles')
-      .select('id');
+      .select('id');  // ← только id, никакого email
 
     if (profilesError) {
       console.error('❌ [sync-users] Ошибка чтения profiles:', profilesError);
@@ -420,9 +418,9 @@ app.post('/api/sync-users', async (req, res) => {
     const existingIds = new Set((existingProfiles ?? []).map((p) => p.id));
     console.log(`[sync-users] Existing profiles: ${existingIds.size}`);
 
-    // Шаг 3: фильтруем "потерянных" — есть в auth, нет в profiles
+    // Шаг 3: фильтруем "потерянных"
     const lost = authUsers.filter((u) => !existingIds.has(u.id));
-    console.log(`[sync-users] Lost users (нет в profiles): ${lost.length}`);
+    console.log(`[sync-users] Lost users: ${lost.length}`);
 
     if (lost.length === 0) {
       return res.json({
@@ -434,27 +432,30 @@ app.post('/api/sync-users', async (req, res) => {
       });
     }
 
-    // Шаг 4: создаём записи в profiles для каждого потерянного
+    // Шаг 4: вставляем только поля которые есть в public.profiles
+    // email не трогаем — его там нет
     const now = new Date().toISOString();
+
     const toInsert = lost.map((u) => ({
-      id: u.id,
-      email: u.email ?? '',
-      name: u.user_metadata?.full_name
-        || u.user_metadata?.name
-        || u.email?.split('@')[0]
-        || 'Без имени',
-      phone: u.user_metadata?.phone || '',
-      slug: u.id, // временный slug = id, мастер поменяет в онбординге
-      plan_type: 'solo',
-      is_premium: false,
+      id:               u.id,
+      // Имя: пробуем вытащить из метаданных, иначе заглушка
+      name:             u.raw_user_meta_data?.full_name
+                        || u.raw_user_meta_data?.name
+                        || u.user_metadata?.full_name
+                        || u.user_metadata?.name
+                        || 'Новый Салон',
+      phone:            u.user_metadata?.phone || '',
+      slug:             u.id,          // временный slug = uuid
+      plan_type:        'solo',
+      is_premium:       false,
       trial_start_date: now,
-      created_at: u.created_at || now,
+      created_at:       u.created_at || now,
     }));
 
     const { data: inserted, error: insertError } = await supabase
       .from('profiles')
       .insert(toInsert)
-      .select('id, name, email');
+      .select('id, name');  // ← только id и name, без email
 
     if (insertError) {
       console.error('❌ [sync-users] Ошибка вставки:', insertError);
@@ -465,11 +466,11 @@ app.post('/api/sync-users', async (req, res) => {
     console.log(`✅ [sync-users] Создано профилей: ${createdCount}`);
 
     return res.json({
-      created: createdCount,
-      total: authUsers.length,
-      skipped: existingIds.size,
-      details: inserted ?? [],
-      message: `Создано ${createdCount} новых профилей`,
+      created:  createdCount,
+      total:    authUsers.length,
+      skipped:  existingIds.size,
+      details:  inserted ?? [],
+      message:  `Создано ${createdCount} новых профилей`,
     });
 
   } catch (err) {
