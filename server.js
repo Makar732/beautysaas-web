@@ -371,6 +371,114 @@ app.post('/api/send-reminders', async (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════════════
+// API: Синхронизация — создаём profiles для "потерянных" auth-юзеров
+// Требует SUPABASE_SERVICE_ROLE_KEY (обходит RLS)
+// ════════════════════════════════════════════════════════════════
+app.post('/api/sync-users', async (req, res) => {
+  const { admin_id } = req.body;
+
+  // Проверяем что запрос от администратора
+  if (!ADMIN_UUID || admin_id !== ADMIN_UUID) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  // Для listUsers нужен service_role — проверяем что он есть
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return res.status(500).json({
+      error: 'SUPABASE_SERVICE_ROLE_KEY не задан на сервере. Добавьте его в Railway Variables.',
+    });
+  }
+
+  try {
+    // Шаг 1: получаем всех пользователей из auth
+    const { data: authData, error: authError } = await supabase.auth.admin.listUsers({
+      perPage: 1000,
+    });
+
+    if (authError) {
+      console.error('❌ [sync-users] Ошибка listUsers:', authError);
+      return res.status(500).json({ error: authError.message });
+    }
+
+    const authUsers = authData?.users ?? [];
+    console.log(`[sync-users] Auth users: ${authUsers.length}`);
+
+    if (authUsers.length === 0) {
+      return res.json({ created: 0, total: 0, skipped: 0, details: [] });
+    }
+
+    // Шаг 2: получаем все существующие profiles
+    const { data: existingProfiles, error: profilesError } = await supabase
+      .from('profiles')
+      .select('id');
+
+    if (profilesError) {
+      console.error('❌ [sync-users] Ошибка чтения profiles:', profilesError);
+      return res.status(500).json({ error: profilesError.message });
+    }
+
+    const existingIds = new Set((existingProfiles ?? []).map((p) => p.id));
+    console.log(`[sync-users] Existing profiles: ${existingIds.size}`);
+
+    // Шаг 3: фильтруем "потерянных" — есть в auth, нет в profiles
+    const lost = authUsers.filter((u) => !existingIds.has(u.id));
+    console.log(`[sync-users] Lost users (нет в profiles): ${lost.length}`);
+
+    if (lost.length === 0) {
+      return res.json({
+        created: 0,
+        total: authUsers.length,
+        skipped: existingIds.size,
+        details: [],
+        message: 'Все пользователи уже синхронизированы',
+      });
+    }
+
+    // Шаг 4: создаём записи в profiles для каждого потерянного
+    const now = new Date().toISOString();
+    const toInsert = lost.map((u) => ({
+      id: u.id,
+      email: u.email ?? '',
+      name: u.user_metadata?.full_name
+        || u.user_metadata?.name
+        || u.email?.split('@')[0]
+        || 'Без имени',
+      phone: u.user_metadata?.phone || '',
+      slug: u.id, // временный slug = id, мастер поменяет в онбординге
+      plan_type: 'solo',
+      is_premium: false,
+      trial_start_date: now,
+      created_at: u.created_at || now,
+    }));
+
+    const { data: inserted, error: insertError } = await supabase
+      .from('profiles')
+      .insert(toInsert)
+      .select('id, name, email');
+
+    if (insertError) {
+      console.error('❌ [sync-users] Ошибка вставки:', insertError);
+      return res.status(500).json({ error: insertError.message });
+    }
+
+    const createdCount = inserted?.length ?? 0;
+    console.log(`✅ [sync-users] Создано профилей: ${createdCount}`);
+
+    return res.json({
+      created: createdCount,
+      total: authUsers.length,
+      skipped: existingIds.size,
+      details: inserted ?? [],
+      message: `Создано ${createdCount} новых профилей`,
+    });
+
+  } catch (err) {
+    console.error('❌ [sync-users] Неожиданная ошибка:', err);
+    return res.status(500).json({ error: err.message || 'Unknown error' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════
 // API: Проверка истечения триалов → уведомление мастерам
 // ════════════════════════════════════════════════════════════════
 app.post('/api/check-trial-expiry', async (req, res) => {

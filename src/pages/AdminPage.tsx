@@ -4,7 +4,7 @@ import {
   Shield, Users, Star, TrendingUp, Send, RefreshCw,
   Crown, Phone, Calendar, AlertCircle, CheckCircle,
   Loader2, Sparkles, LogOut, ChevronLeft, Trash2,
-  StarOff, RotateCcw, Gift, Award,
+  StarOff, RotateCcw, Gift, Award, DatabaseZap,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -37,24 +37,22 @@ interface Stats {
   mrr: number;
 }
 
-// Для каждой кнопки — своё состояние
 type BtnState = 'idle' | 'loading' | 'confirm' | 'success' | 'error';
 
 interface RowStates {
-  grantPlan: BtnState;   // ★ НОВОЕ — выдать план
-  extend: BtnState;
-  revoke: BtnState;
+  grantPlan:  BtnState;
+  extend:     BtnState;
+  revoke:     BtnState;
   grantTrial: BtnState;
   resetTrial: BtnState;
-  delete: BtnState;
+  delete:     BtnState;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────
-
 function daysUntil(isoDate: string | null | undefined): number {
   if (!isoDate) return 0;
   const target = new Date(isoDate);
-  const now = new Date();
+  const now    = new Date();
   target.setHours(0, 0, 0, 0);
   now.setHours(0, 0, 0, 0);
   return Math.round((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
@@ -69,8 +67,8 @@ function trialDaysLeft(trialStartDate: string | null): number {
 }
 
 interface SubStatus {
-  label: string;
-  detail: string;
+  label:      string;
+  detail:     string;
   badgeClass: string;
 }
 
@@ -80,89 +78,82 @@ function getSubStatus(master: MasterRow): SubStatus {
     if (master.premium_expires_at) {
       const days = daysUntil(master.premium_expires_at);
       return {
-        label: planLabel,
-        detail: days > 0 ? `Ещё ${days} дн.` : 'Истёк',
+        label:      planLabel,
+        detail:     days > 0 ? `Ещё ${days} дн.` : 'Истёк',
         badgeClass: days > 0
           ? 'text-amber-400 bg-amber-500/10 border-amber-500/30'
           : 'text-red-400 bg-red-500/10 border-red-500/30',
       };
     }
     return {
-      label: planLabel,
-      detail: 'Бессрочно',
+      label:      planLabel,
+      detail:     'Бессрочно',
       badgeClass: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
     };
   }
   const left = trialDaysLeft(master.trial_start_date);
   if (left > 0) {
     return {
-      label: 'Триал',
-      detail: `Осталось ${left} дн.`,
+      label:      'Триал',
+      detail:     `Осталось ${left} дн.`,
       badgeClass: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
     };
   }
   return {
-    label: 'Бесплатный',
-    detail: 'Триал истёк',
+    label:      'Бесплатный',
+    detail:     'Триал истёк',
     badgeClass: 'text-gray-500 bg-gray-500/10 border-gray-500/30',
   };
 }
 
 function defaultRowStates(): RowStates {
   return {
-    grantPlan: 'idle',
-    extend: 'idle',
-    revoke: 'idle',
+    grantPlan:  'idle',
+    extend:     'idle',
+    revoke:     'idle',
     grantTrial: 'idle',
     resetTrial: 'idle',
-    delete: 'idle',
+    delete:     'idle',
   };
 }
 
 // ─── Универсальная кнопка действия ───────────────────────────
 interface ActionBtnProps {
-  btnState: BtnState;
-  onClick: () => void;
-  idleClass: string;
-  idleContent: React.ReactNode;
+  btnState:       BtnState;
+  onClick:        () => void;
+  idleClass:      string;
+  idleContent:    React.ReactNode;
   confirmContent?: React.ReactNode;
-  confirmClass?: string;
+  confirmClass?:  string;
   successContent?: React.ReactNode;
-  successClass?: string;
-  visible?: boolean;
-  title?: string;
+  successClass?:  string;
+  visible?:       boolean;
+  title?:         string;
 }
 
 function ActionBtn({
-  btnState,
-  onClick,
-  idleClass,
-  idleContent,
-  confirmContent,
-  confirmClass,
-  successContent,
-  successClass,
-  visible = true,
-  title,
+  btnState, onClick, idleClass, idleContent,
+  confirmContent, confirmClass, successContent, successClass,
+  visible = true, title,
 }: ActionBtnProps) {
   if (!visible) return null;
 
   const isDisabled = btnState === 'loading' || btnState === 'success';
 
   const cls = {
-    idle: idleClass,
+    idle:    idleClass,
     loading: `${idleClass} opacity-60`,
     confirm: confirmClass ?? 'bg-red-600/30 text-red-300 border-red-500/40 animate-pulse',
     success: successClass ?? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-    error: 'bg-red-500/10 text-red-400 border-red-500/20',
+    error:   'bg-red-500/10 text-red-400 border-red-500/20',
   }[btnState];
 
   const content = {
-    idle: idleContent,
+    idle:    idleContent,
     loading: <><Loader2 size={11} className="animate-spin shrink-0" /><span>...</span></>,
     confirm: confirmContent ?? idleContent,
     success: successContent ?? <><CheckCircle size={11} className="shrink-0" /><span>Готово</span></>,
-    error: <><AlertCircle size={11} className="shrink-0" /><span>Ошибка</span></>,
+    error:   <><AlertCircle size={11} className="shrink-0" /><span>Ошибка</span></>,
   }[btnState];
 
   return (
@@ -185,39 +176,37 @@ function ActionBtn({
 // ─── Основной компонент ───────────────────────────────────────
 export default function AdminPage() {
   const { user, logout } = useAuth();
-  const navigate = useNavigate();
+  const navigate         = useNavigate();
 
-  const [masters, setMasters] = useState<MasterRow[]>([]);
-  const [stats, setStats] = useState<Stats>({ totalMasters: 0, activePremium: 0, mrr: 0 });
+  const [masters,   setMasters]   = useState<MasterRow[]>([]);
+  const [stats,     setStats]     = useState<Stats>({ totalMasters: 0, activePremium: 0, mrr: 0 });
   const [isLoading, setIsLoading] = useState(true);
 
   // Broadcast
-  const [broadcastText, setBroadcastText] = useState('');
-  const [broadcastStatus, setBroadcastStatus] = useState<
-    'idle' | 'sending' | 'success' | 'error'
-  >('idle');
+  const [broadcastText,   setBroadcastText]   = useState('');
+  const [broadcastStatus, setBroadcastStatus] = useState<'idle'|'sending'|'success'|'error'>('idle');
   const [broadcastResult, setBroadcastResult] = useState('');
 
-  // ★ НОВОЕ — модалка выбора плана
-  const [showPlanModal, setShowPlanModal] = useState(false);
-  const [selectedMasterForPlan, setSelectedMasterForPlan] = useState<MasterRow | null>(null);
-  const [selectedPlanType, setSelectedPlanType] = useState<'solo' | 'salon'>('solo');
+  // ── Синхронизация БД ──────────────────────────────────────
+  const [syncState,  setSyncState]  = useState<'idle'|'loading'|'success'|'error'>('idle');
+  const [syncResult, setSyncResult] = useState('');
 
-  // Состояния кнопок для каждой строки
+  // Модалка выбора плана
+  const [showPlanModal,          setShowPlanModal]          = useState(false);
+  const [selectedMasterForPlan,  setSelectedMasterForPlan]  = useState<MasterRow | null>(null);
+  const [selectedPlanType,       setSelectedPlanType]       = useState<'solo'|'salon'>('solo');
+
+  // Состояния кнопок строк
   const [rowStates, setRowStates] = useState<Record<string, RowStates>>({});
-
-  // Таймеры для авто-сброса "confirm"
   const confirmTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const isAdmin = user?.id === ADMIN_UUID;
 
   useEffect(() => {
-    if (!user) { navigate('/login', { replace: true }); return; }
+    if (!user)    { navigate('/login',     { replace: true }); return; }
     if (!isAdmin) { navigate('/dashboard', { replace: true }); return; }
     loadData();
-    return () => {
-      Object.values(confirmTimers.current).forEach(clearTimeout);
-    };
+    return () => { Object.values(confirmTimers.current).forEach(clearTimeout); };
   }, [user, isAdmin]);
 
   // ─── Загрузка ──────────────────────────────────────────────
@@ -227,13 +216,14 @@ export default function AdminPage() {
       const { data, error } = await supabase
         .from('profiles')
         .select(
-          'id,name,phone,slug,is_premium,premium_expires_at,plan_type,trial_start_date,created_at,telegram_id,telegram_chat_id'
+          'id,name,phone,slug,is_premium,premium_expires_at,plan_type,' +
+          'trial_start_date,created_at,telegram_id,telegram_chat_id'
         )
         .order('created_at', { ascending: false });
 
       if (error) throw error;
 
-      const rows = (data as MasterRow[]) ?? [];
+      const rows = (data as unknown as MasterRow[]) ?? [];
       const real = rows.filter(
         (m) => m.name?.trim().length >= 2 && m.phone?.trim().length >= 5
       );
@@ -245,11 +235,7 @@ export default function AdminPage() {
       setRowStates(initStates);
 
       const activePremium = real.filter((m) => m.is_premium).length;
-      setStats({
-        totalMasters: real.length,
-        activePremium,
-        mrr: activePremium * PREMIUM_PRICE,
-      });
+      setStats({ totalMasters: real.length, activePremium, mrr: activePremium * PREMIUM_PRICE });
     } catch (err) {
       console.error('❌ Ошибка загрузки:', err);
     } finally {
@@ -267,7 +253,7 @@ export default function AdminPage() {
 
   const patchMaster = (masterId: string, patch: Partial<MasterRow>) => {
     setMasters((prev) => {
-      const updated = prev.map((m) => m.id === masterId ? { ...m, ...patch } : m);
+      const updated     = prev.map((m) => m.id === masterId ? { ...m, ...patch } : m);
       const activePremium = updated.filter((m) => m.is_premium).length;
       setStats({ totalMasters: updated.length, activePremium, mrr: activePremium * PREMIUM_PRICE });
       return updated;
@@ -276,13 +262,59 @@ export default function AdminPage() {
 
   const autoReset = (key: string, masterId: string, btn: keyof RowStates, delay = 3000) => {
     clearTimeout(confirmTimers.current[key]);
-    confirmTimers.current[key] = setTimeout(
-      () => setBtn(masterId, btn, 'idle'),
-      delay
-    );
+    confirmTimers.current[key] = setTimeout(() => setBtn(masterId, btn, 'idle'), delay);
   };
 
-  // ─── ★ НОВОЕ: Выдать план (Соло/Салон) ─────────────────────
+  // ─── Синхронизация БД ──────────────────────────────────────
+  const handleSyncUsers = async () => {
+    if (syncState === 'loading') return;
+
+    setSyncState('loading');
+    setSyncResult('');
+
+    try {
+      const res = await fetch('/api/sync-users', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ admin_id: user?.id }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+
+      setSyncState('success');
+
+      if (data.created === 0) {
+        setSyncResult(`✅ Все синхронизировано. Новых пользователей не найдено (всего в auth: ${data.total}).`);
+      } else {
+        setSyncResult(
+          `✅ Создано ${data.created} профилей: ` +
+          (data.details as Array<{name:string; email:string}>)
+            .map((u) => u.name || u.email)
+            .join(', ')
+        );
+      }
+
+      // Перезагружаем таблицу мастеров
+      await loadData();
+
+    } catch (err: any) {
+      console.error('❌ Sync error:', err);
+      setSyncState('error');
+      setSyncResult(`❌ Ошибка: ${err.message}`);
+    } finally {
+      // Через 6 секунд сбрасываем в idle
+      setTimeout(() => {
+        setSyncState('idle');
+        setSyncResult('');
+      }, 6000);
+    }
+  };
+
+  // ─── Выдать план ───────────────────────────────────────────
   const handleGrantPlanClick = (master: MasterRow) => {
     setSelectedMasterForPlan(master);
     setSelectedPlanType(master.plan_type || 'solo');
@@ -293,15 +325,15 @@ export default function AdminPage() {
     if (!selectedMasterForPlan) return;
     setBtn(selectedMasterForPlan.id, 'grantPlan', 'loading');
     try {
-      const now = new Date();
+      const now    = new Date();
       const expiry = new Date(now);
       expiry.setDate(expiry.getDate() + 30);
 
       const { error } = await supabase
         .from('profiles')
         .update({
-          is_premium: true,
-          plan_type: selectedPlanType,
+          is_premium:         true,
+          plan_type:          selectedPlanType,
           premium_expires_at: expiry.toISOString(),
         })
         .eq('id', selectedMasterForPlan.id);
@@ -309,11 +341,10 @@ export default function AdminPage() {
       if (error) throw error;
 
       patchMaster(selectedMasterForPlan.id, {
-        is_premium: true,
-        plan_type: selectedPlanType,
+        is_premium:         true,
+        plan_type:          selectedPlanType,
         premium_expires_at: expiry.toISOString(),
       });
-
       setBtn(selectedMasterForPlan.id, 'grantPlan', 'success');
       autoReset(`gp_${selectedMasterForPlan.id}`, selectedMasterForPlan.id, 'grantPlan');
       setShowPlanModal(false);
@@ -324,7 +355,7 @@ export default function AdminPage() {
     }
   };
 
-  // ─── 1. Продлить Premium +30 дней ──────────────────────────
+  // ─── +30 дней Premium ──────────────────────────────────────
   const handleExtend = async (master: MasterRow) => {
     if (rowStates[master.id]?.extend === 'loading') return;
     setBtn(master.id, 'extend', 'loading');
@@ -341,17 +372,11 @@ export default function AdminPage() {
 
       const { error } = await supabase
         .from('profiles')
-        .update({
-          is_premium: true,
-          premium_expires_at: newExpiry.toISOString(),
-        })
+        .update({ is_premium: true, premium_expires_at: newExpiry.toISOString() })
         .eq('id', master.id);
       if (error) throw error;
 
-      patchMaster(master.id, {
-        is_premium: true,
-        premium_expires_at: newExpiry.toISOString(),
-      });
+      patchMaster(master.id, { is_premium: true, premium_expires_at: newExpiry.toISOString() });
       setBtn(master.id, 'extend', 'success');
       autoReset(`ext_${master.id}`, master.id, 'extend');
     } catch {
@@ -360,11 +385,10 @@ export default function AdminPage() {
     }
   };
 
-  // ─── 2. Снять Premium ───────────────────────────────────────
+  // ─── Снять Premium ─────────────────────────────────────────
   const handleRevoke = async (master: MasterRow) => {
     const state = rowStates[master.id]?.revoke;
     if (state === 'loading') return;
-
     if (state !== 'confirm') {
       setBtn(master.id, 'revoke', 'confirm');
       autoReset(`rev_${master.id}`, master.id, 'revoke', 4000);
@@ -375,19 +399,11 @@ export default function AdminPage() {
     try {
       const { error } = await supabase
         .from('profiles')
-        .update({
-          is_premium: false,
-          premium_expires_at: null,
-          plan_type: null,
-        })
+        .update({ is_premium: false, premium_expires_at: null, plan_type: null })
         .eq('id', master.id);
       if (error) throw error;
 
-      patchMaster(master.id, {
-        is_premium: false,
-        premium_expires_at: null,
-        plan_type: null,
-      });
+      patchMaster(master.id, { is_premium: false, premium_expires_at: null, plan_type: null });
       setBtn(master.id, 'revoke', 'success');
       autoReset(`rev_${master.id}`, master.id, 'revoke');
     } catch {
@@ -396,7 +412,7 @@ export default function AdminPage() {
     }
   };
 
-  // ─── 3. Дать триал +14 дней ────────────────────────────────
+  // ─── +14 дней триала ───────────────────────────────────────
   const handleGrantTrial = async (master: MasterRow) => {
     if (rowStates[master.id]?.grantTrial === 'loading') return;
     setBtn(master.id, 'grantTrial', 'loading');
@@ -417,7 +433,7 @@ export default function AdminPage() {
     }
   };
 
-  // ─── 4. Сбросить триал ──────────────────────────────────────
+  // ─── Сбросить триал ────────────────────────────────────────
   const handleResetTrial = async (master: MasterRow) => {
     if (rowStates[master.id]?.resetTrial === 'loading') return;
     setBtn(master.id, 'resetTrial', 'loading');
@@ -439,11 +455,10 @@ export default function AdminPage() {
     }
   };
 
-  // ─── 5. Удалить профиль ─────────────────────────────────────
+  // ─── Удалить профиль ───────────────────────────────────────
   const handleDelete = async (master: MasterRow) => {
     const state = rowStates[master.id]?.delete;
     if (state === 'loading') return;
-
     if (state !== 'confirm') {
       setBtn(master.id, 'delete', 'confirm');
       autoReset(`del_${master.id}`, master.id, 'delete', 4000);
@@ -490,14 +505,14 @@ export default function AdminPage() {
         return;
       }
       const res = await fetch('/api/broadcast', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           admin_id: user?.id,
-          message: broadcastText.trim(),
-          targets: targets.map((m) => ({
-            id: m.id,
-            name: m.name,
+          message:  broadcastText.trim(),
+          targets:  targets.map((m) => ({
+            id:          m.id,
+            name:        m.name,
             telegram_id: m.telegram_id || m.telegram_chat_id,
           })),
         }),
@@ -540,8 +555,41 @@ export default function AdminPage() {
             </span>
           </div>
         </div>
+
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-400 hidden sm:block">{user.name}</span>
+
+          {/* ── КНОПКА СИНХРОНИЗАЦИИ ── */}
+          <button
+            onClick={handleSyncUsers}
+            disabled={syncState === 'loading'}
+            title="Синхронизировать базу — найти пользователей без профиля"
+            className={`
+              flex items-center gap-2 text-sm font-semibold px-3 py-2 rounded-xl border
+              transition-all cursor-pointer disabled:cursor-not-allowed
+              ${syncState === 'idle'    ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/20' : ''}
+              ${syncState === 'loading' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30 opacity-60' : ''}
+              ${syncState === 'success' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : ''}
+              ${syncState === 'error'   ? 'bg-red-500/10 text-red-400 border-red-500/30' : ''}
+            `}
+          >
+            {syncState === 'loading' ? (
+              <Loader2 size={15} className="animate-spin shrink-0" />
+            ) : syncState === 'success' ? (
+              <CheckCircle size={15} className="shrink-0" />
+            ) : syncState === 'error' ? (
+              <AlertCircle size={15} className="shrink-0" />
+            ) : (
+              <DatabaseZap size={15} className="shrink-0" />
+            )}
+            <span className="hidden sm:block">
+              {syncState === 'loading' ? 'Синхронизация...'
+               : syncState === 'success' ? 'Синхронизировано'
+               : syncState === 'error'   ? 'Ошибка'
+               : 'Синхр. базу'}
+            </span>
+          </button>
+
           <button
             onClick={loadData}
             disabled={isLoading}
@@ -550,6 +598,7 @@ export default function AdminPage() {
           >
             <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
           </button>
+
           <button
             onClick={() => { logout(); navigate('/'); }}
             className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-red-400 transition-colors cursor-pointer"
@@ -569,12 +618,25 @@ export default function AdminPage() {
           </p>
         </div>
 
+        {/* Результат синхронизации — показываем под заголовком */}
+        {syncResult && (
+          <div className={`flex items-start gap-3 px-4 py-3 rounded-xl text-sm border ${
+            syncState === 'success'
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+              : 'bg-red-500/10 border-red-500/20 text-red-400'
+          }`}>
+            {syncState === 'success'
+              ? <CheckCircle size={16} className="shrink-0 mt-0.5" />
+              : <AlertCircle size={16} className="shrink-0 mt-0.5" />}
+            <span>{syncResult}</span>
+          </div>
+        )}
+
         {/* АНАЛИТИКА */}
         <section>
           <SectionTitle icon={<TrendingUp size={18} className="text-emerald-400" />}>
             Блок А — Бизнес-аналитика
           </SectionTitle>
-
           {isLoading ? (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {[0, 1, 2].map((i) => (
@@ -615,7 +677,6 @@ export default function AdminPage() {
           <SectionTitle icon={<Send size={18} className="text-blue-400" />}>
             Блок Б — Массовая рассылка
           </SectionTitle>
-
           <div className="bg-gray-900 rounded-2xl border border-white/8 p-6 space-y-4">
             <p className="text-sm text-gray-400">
               Сообщение получат все мастера с привязанным Telegram.
@@ -633,7 +694,6 @@ export default function AdminPage() {
               />
               <p className="text-xs text-gray-600 mt-1">{broadcastText.length} символов</p>
             </div>
-
             {broadcastStatus !== 'idle' && broadcastResult && (
               <div className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm border ${
                 broadcastStatus === 'success'
@@ -643,12 +703,11 @@ export default function AdminPage() {
                   : 'bg-blue-500/10 border-blue-500/20 text-blue-400'
               }`}>
                 {broadcastStatus === 'success' && <CheckCircle size={16} />}
-                {broadcastStatus === 'error' && <AlertCircle size={16} />}
+                {broadcastStatus === 'error'   && <AlertCircle size={16} />}
                 {broadcastStatus === 'sending' && <Loader2 size={16} className="animate-spin" />}
                 {broadcastResult}
               </div>
             )}
-
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <p className="text-xs text-gray-500">
                 Telegram: {masters.filter((m) => m.telegram_id?.trim() || m.telegram_chat_id?.trim()).length} / {masters.length}
@@ -695,18 +754,8 @@ export default function AdminPage() {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-white/8 bg-gray-800/50">
-                        {[
-                          'Мастер / Студия',
-                          'Телефон',
-                          'Telegram',
-                          'Статус подписки',
-                          'Регистрация',
-                          'Действия',
-                        ].map((h) => (
-                          <th
-                            key={h}
-                            className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wide px-4 py-3 first:pl-6 last:pr-6"
-                          >
+                        {['Мастер / Студия','Телефон','Telegram','Статус подписки','Регистрация','Действия'].map((h) => (
+                          <th key={h} className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wide px-4 py-3 first:pl-6 last:pr-6">
                             {h}
                           </th>
                         ))}
@@ -714,14 +763,13 @@ export default function AdminPage() {
                     </thead>
                     <tbody className="divide-y divide-white/5">
                       {masters.map((master) => {
-                        const sub = getSubStatus(master);
+                        const sub    = getSubStatus(master);
                         const states = rowStates[master.id] ?? defaultRowStates();
-                        const hasTg = !!(master.telegram_id?.trim() || master.telegram_chat_id?.trim());
+                        const hasTg  = !!(master.telegram_id?.trim() || master.telegram_chat_id?.trim());
 
                         return (
                           <tr key={master.id} className="hover:bg-white/3 transition-colors align-top">
 
-                            {/* Мастер */}
                             <td className="pl-6 pr-4 py-4">
                               <div className="flex items-center gap-3">
                                 <div className="w-9 h-9 bg-emerald-700 rounded-full flex items-center justify-center text-sm font-bold shrink-0">
@@ -738,7 +786,6 @@ export default function AdminPage() {
                               </div>
                             </td>
 
-                            {/* Телефон */}
                             <td className="px-4 py-4">
                               <div className="flex items-center gap-1.5 text-sm text-gray-300">
                                 <Phone size={12} className="text-gray-500 shrink-0" />
@@ -746,7 +793,6 @@ export default function AdminPage() {
                               </div>
                             </td>
 
-                            {/* Telegram */}
                             <td className="px-4 py-4">
                               {hasTg ? (
                                 <span className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-1 rounded-lg">
@@ -757,7 +803,6 @@ export default function AdminPage() {
                               )}
                             </td>
 
-                            {/* Статус */}
                             <td className="px-4 py-4">
                               <div className={`inline-flex flex-col px-2.5 py-1.5 rounded-xl border ${sub.badgeClass}`}>
                                 <span className="text-xs font-bold leading-tight">{sub.label}</span>
@@ -765,7 +810,6 @@ export default function AdminPage() {
                               </div>
                             </td>
 
-                            {/* Дата */}
                             <td className="px-4 py-4">
                               <div className="flex items-center gap-1.5 text-xs text-gray-500 whitespace-nowrap">
                                 <Calendar size={12} />
@@ -775,99 +819,70 @@ export default function AdminPage() {
                               </div>
                             </td>
 
-                            {/* ДЕЙСТВИЯ */}
                             <td className="px-4 pr-6 py-4">
                               <div className="flex flex-col gap-1.5">
-
-                                {/* ★ НОВОЕ — выдать план */}
                                 <div className="flex flex-wrap gap-1.5">
                                   <ActionBtn
                                     btnState={states.grantPlan}
                                     onClick={() => handleGrantPlanClick(master)}
                                     idleClass="bg-purple-500/10 text-purple-400 border-purple-500/20 hover:bg-purple-500/20"
-                                    idleContent={
-                                      <><Award size={11} className="shrink-0" /><span>Выдать план</span></>
-                                    }
+                                    idleContent={<><Award size={11} className="shrink-0" /><span>Выдать план</span></>}
                                     successClass="bg-purple-500/10 text-purple-400 border-purple-500/20"
                                     title="Выдать тариф Соло/Салон на 30 дней"
                                   />
                                 </div>
-
-                                {/* Premium-действия */}
                                 <div className="flex flex-wrap gap-1.5">
                                   <ActionBtn
                                     btnState={states.extend}
                                     onClick={() => handleExtend(master)}
                                     idleClass="bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20"
-                                    idleContent={
-                                      <><Star size={11} className="shrink-0" /><span>+30 дн.</span></>
-                                    }
+                                    idleContent={<><Star size={11} className="shrink-0" /><span>+30 дн.</span></>}
                                     successClass="bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                                     title="Продлить на 30 дней"
                                   />
-
                                   <ActionBtn
                                     btnState={states.revoke}
                                     onClick={() => handleRevoke(master)}
                                     visible={master.is_premium}
                                     idleClass="bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20"
-                                    idleContent={
-                                      <><StarOff size={11} className="shrink-0" /><span>Снять</span></>
-                                    }
-                                    confirmContent={
-                                      <><AlertCircle size={11} className="shrink-0" /><span>Уверен?</span></>
-                                    }
+                                    idleContent={<><StarOff size={11} className="shrink-0" /><span>Снять</span></>}
+                                    confirmContent={<><AlertCircle size={11} className="shrink-0" /><span>Уверен?</span></>}
                                     confirmClass="bg-red-600/40 text-red-300 border-red-500/50 animate-pulse"
                                     successClass="bg-gray-500/10 text-gray-400 border-gray-500/20"
                                     title="Снять Premium"
                                   />
                                 </div>
-
-                                {/* Триал */}
                                 <div className="flex flex-wrap gap-1.5">
                                   <ActionBtn
                                     btnState={states.grantTrial}
                                     onClick={() => handleGrantTrial(master)}
                                     idleClass="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20"
-                                    idleContent={
-                                      <><Gift size={11} className="shrink-0" /><span>+14д</span></>
-                                    }
+                                    idleContent={<><Gift size={11} className="shrink-0" /><span>+14д</span></>}
                                     successClass="bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                                     title="+14 дней триала"
                                   />
-
                                   <ActionBtn
                                     btnState={states.resetTrial}
                                     onClick={() => handleResetTrial(master)}
                                     idleClass="bg-orange-500/10 text-orange-400 border-orange-500/20 hover:bg-orange-500/20"
-                                    idleContent={
-                                      <><RotateCcw size={11} className="shrink-0" /><span>Сбр.</span></>
-                                    }
+                                    idleContent={<><RotateCcw size={11} className="shrink-0" /><span>Сбр.</span></>}
                                     successClass="bg-orange-500/10 text-orange-400 border-orange-500/20"
                                     title="Сбросить триал"
                                   />
                                 </div>
-
-                                {/* Удалить */}
                                 <div>
                                   <ActionBtn
                                     btnState={states.delete}
                                     onClick={() => handleDelete(master)}
                                     idleClass="bg-gray-800 text-gray-500 border-gray-700 hover:bg-red-900/20 hover:text-red-400"
-                                    idleContent={
-                                      <><Trash2 size={11} className="shrink-0" /><span>Удалить</span></>
-                                    }
-                                    confirmContent={
-                                      <><AlertCircle size={11} className="shrink-0" /><span>Точно?</span></>
-                                    }
+                                    idleContent={<><Trash2 size={11} className="shrink-0" /><span>Удалить</span></>}
+                                    confirmContent={<><AlertCircle size={11} className="shrink-0" /><span>Точно?</span></>}
                                     confirmClass="bg-red-600/30 text-red-300 border-red-500/40 animate-pulse"
                                     title="Удалить профиль"
                                   />
                                 </div>
-
                               </div>
                             </td>
-
                           </tr>
                         );
                       })}
@@ -878,9 +893,9 @@ export default function AdminPage() {
                 {/* MOBILE CARDS */}
                 <div className="lg:hidden divide-y divide-white/5">
                   {masters.map((master) => {
-                    const sub = getSubStatus(master);
+                    const sub    = getSubStatus(master);
                     const states = rowStates[master.id] ?? defaultRowStates();
-                    const hasTg = !!(master.telegram_id?.trim() || master.telegram_chat_id?.trim());
+                    const hasTg  = !!(master.telegram_id?.trim() || master.telegram_chat_id?.trim());
 
                     return (
                       <div key={master.id} className="p-4 space-y-3">
@@ -897,13 +912,11 @@ export default function AdminPage() {
                             <span className="text-xs opacity-70 leading-tight">{sub.detail}</span>
                           </div>
                         </div>
-
                         <div className="flex items-center gap-3 text-xs text-gray-500">
                           <span>{hasTg ? '🟢 Telegram' : '⚪ Нет TG'}</span>
                           <span>·</span>
                           <span>{new Date(master.created_at).toLocaleDateString('ru-RU')}</span>
                         </div>
-
                         <div className="flex flex-wrap gap-1.5">
                           <ActionBtn
                             btnState={states.grantPlan}
@@ -955,7 +968,7 @@ export default function AdminPage() {
         </section>
       </main>
 
-      {/* ★ МОДАЛКА ВЫБОРА ПЛАНА */}
+      {/* МОДАЛКА ВЫБОРА ПЛАНА */}
       {showPlanModal && selectedMasterForPlan && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
           <div className="bg-gray-900 rounded-3xl border border-white/10 p-8 max-w-md w-full shadow-2xl">
@@ -963,11 +976,8 @@ export default function AdminPage() {
             <p className="text-sm text-gray-400 mb-6">
               Мастер: <span className="text-white font-semibold">{selectedMasterForPlan.name}</span>
             </p>
-
             <div className="space-y-3 mb-6">
-              <label className="text-sm font-medium text-gray-300 block">
-                Выберите тариф:
-              </label>
+              <label className="text-sm font-medium text-gray-300 block">Выберите тариф:</label>
               <div className="grid grid-cols-2 gap-3">
                 {(['solo', 'salon'] as const).map((plan) => (
                   <button
@@ -986,24 +996,17 @@ export default function AdminPage() {
                 ))}
               </div>
             </div>
-
             <div className="bg-emerald-950/30 border border-emerald-700/30 rounded-2xl p-4 mb-6">
-              <p className="text-sm text-emerald-300">
-                <strong>✅ Будет выдано:</strong>
-              </p>
+              <p className="text-sm text-emerald-300"><strong>✅ Будет выдано:</strong></p>
               <ul className="text-xs text-emerald-400 mt-2 space-y-1 list-disc list-inside">
                 <li>Тариф: <strong>{selectedPlanType === 'solo' ? 'Соло' : 'Салон'}</strong></li>
                 <li>Срок: <strong>30 дней</strong> (до {new Date(new Date().setDate(new Date().getDate() + 30)).toLocaleDateString('ru-RU')})</li>
                 <li>Статус: <strong>Premium активен</strong></li>
               </ul>
             </div>
-
             <div className="flex gap-3">
               <button
-                onClick={() => {
-                  setShowPlanModal(false);
-                  setSelectedMasterForPlan(null);
-                }}
+                onClick={() => { setShowPlanModal(false); setSelectedMasterForPlan(null); }}
                 className="flex-1 py-3 rounded-xl bg-gray-800 hover:bg-gray-700 text-white font-semibold transition-all cursor-pointer"
               >
                 Отмена
@@ -1024,13 +1027,7 @@ export default function AdminPage() {
 }
 
 // ─── Sub-components ───────────────────────────────────────────
-
-function SectionTitle({
-  icon, children,
-}: {
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}) {
+function SectionTitle({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 mb-4">
       {icon}
@@ -1042,11 +1039,11 @@ function SectionTitle({
 function StatCard({
   icon, iconBg, label, value, sub, valueClass = 'text-white',
 }: {
-  icon: React.ReactNode;
-  iconBg: string;
-  label: string;
-  value: string | number;
-  sub: string;
+  icon:        React.ReactNode;
+  iconBg:      string;
+  label:       string;
+  value:       string | number;
+  sub:         string;
   valueClass?: string;
 }) {
   return (
