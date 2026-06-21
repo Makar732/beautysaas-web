@@ -1,0 +1,73 @@
+[33me07179c[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/dev[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mdev[m[33m)[m fix: resolve merge conflict - use /supabase-proxy
+[33ma0e56ab[m fix: resolve merge conflict - use /supabase-proxy
+[33m38647ba[m[33m ([m[1;31morigin/feature/proxy-only[m[33m, [m[1;32mfeature/proxy-only[m[33m)[m feat: add supabase proxy route to bypass RKN/TSPU blocking in RF
+[33m8b36727[m fix: использовать auth.uid() как ID профиля вместо генерации
+[33mcd25acf[m fix: ожидание сессии перед запросом профиля при повторном входе
+[33m6c13bd2[m fix: retry logic для getMasterById + localStorage fallback
+[33m2ef97d6[m fix: добавлен trailing slash в proxy URL для корректной маршрутизации Supabase SDK
+[33mf893294[m feat: добавлен backend proxy для обхода блокировок Supabase в РФ
+[33m4a621eb[m Save dev changes
+[33m5bef7c6[m Обновление записей мастеров и uz
+[33ma907531[m style: вернул кнопке протестировать виджет её законный желтый цвет
+[33mc64b9c7[m fix: исправил отзывы, футер и ссылку на триал период
+[33m9c61614[m fix: починил дашборд и отображение кнопок
+[33m5008aaf[m fix: починил дашборд и отображение кнопок
+[33m7b53cbc[m fix: bump version to invalidate railway cache
+[33m4f18201[m trigger redeploy
+[33m0c9ec32[m fix: ensure all salon features are committed
+[33m3eb05e5[m feat: salon master booking flow - step [Master->Service->Time->Contacts]
+[33m2b2b6ee[m feat: salon master booking flow - step [Master->Service->Time->Contacts]
+[33mbd8bb92[m feat: add /api/notify-salon-master endpoint and sm_ webhook onboarding
+[33mfd4ada6[m feat: add SalonMaster type, MASTER_LIMITS, salon_masters CRUD in storage
+[33mcaef7c5[m feat: интеграция кнопок тарифов → Telegram-бот
+[33ma29cf7d[m Update Telegram links for pricing and add mobile subscription CTA
+[33ma5d6ffd[m fix: добавлена динамическая подписка (Соло/Салон), счетчик дней и кнопка продления в Sidebar
+[33m500c2df[m feat: добавил тариф Соло, обновил логику подписок и UI Sidebar
+[33m97b6df9[m feat: добавил тариф Соло, обновил логику подписок и UI Sidebar
+[33mffc3783[m feat: добавлен бот поддержки
+[33m9bb9612[m legal: privacy policy updates
+[33m6e8d2dc[m Remove demo master slug block from LandingPage.tsx
+[33m96f4984[m feat: разделение токенов ботов, блокировка триала и ссылки на оплату
+[33m00edbc5[m feat: разделение токенов ботов, блокировка триала и ссылки на оплату
+[33m92d72a4[m Split Telegram bot tokens: use TELEGRAM_NOTIFY_BOT_TOKEN for notifications and TELEGRAM_SUPPORT_BOT_TOKEN for support broadcasts
+[33m26ba770[m feat: ссылки на оплату, виджет и блокировка уведомлений при истекшем триале
+[33m7f1fec3[m fix: завершена админ панель со всеми кнопками управления и адаптивной мобильной версией
+[33me0fa101[m feat: доработка админки, фикс мобильной навигации и удаление dev_panel
+[33m2263993[m Replace mobile header in DashboardPage
+[33mde968cc[m Update dashboard page after latest changes
+[33m493a3c1[m Add admin broadcast endpoint and admin panel access in dashboard
+[33mcc41c1d[m fix: prevent redirect loop on reload, fix PhoneInput styles on onboarding
+[33m38d9db1[m feat: remove OAuth providers, add clean email+password auth with onboarding flow
+[33m653e7e8[m fix(build): исправлены TS ошибки (unused imports), улучшена LoginPage + AuthContext под строгий роутинг и Yandex ID
+[33md6620c7[m feat(auth): полная интеграция Yandex ID + email, безопасные метаданные, строгий роутинг и онбординг через profiles
+[33m3783576[m fix: yandex provider typescript error (as Provider)
+[33m4328a18[m feat: завершена интеграция Yandex ID, добавлена жёсткая проверка онбординга
+[33md9e5774[m fix: логика яндекса, фикс тарифа и чистка базы
+[33me7dd9ba[m feat: обновил авторизацию на Яндекс и починил цены
+[33m020f97c[m feat: обновил авторизацию на Яндекс/ВК и починил цен1
+[33me4b5c59[m feat: обновил авторизацию на Яндекс/ВК и починил цены
+[33mbeac8ae[m feat(bot): implement client TG reminders via deep linking and handle master/client roles
+[33m85e18a6[m feat(bot): implement client TG reminders via deep linking and handle master/client roles
+[33mb690bcc[m feat: добавил лимиты и монетизацию пррбный период1
+[33m6d941fc[m feat: добавил лимиты и монетизацию
+[33ma1ea1a5[m security: move telegram notifications to server-side API
+[33mfd57cb3[m fix: use foundMaster directly, telegram_id no longer lost
+[33m136c60b[m feat: telegram bot webhook for linking accounts
+[33m0629712[m feat: add telegram bot token and username
+[33ma12c905[m feat: analytics tab, telegram bot link, card height fix, trial system
+[33m6ddd305[m feat: real Google OAuth via Supabase
+[33m714577c[m deploy: prepare for Railway
+[33m101b884[m Предфинальная 3его этапа!
+[33medfcffe[m Сайт работает
+[33m81f7407[m тяжко
+[33mee09388[m fix: protect .env from git tracking
+[33m063a85f[m fix: total purge of mock data, strict sync and fullscreen booking
+[33mcb1b692[m Еще одно исправление бэкэнда
+[33mbad4e60[m Исправление косметики фронтенда
+[33m6f405e2[m Финал этапа 1: рабочий деплой на Railway.
+[33m86529d3[m fix: remove node_modules from git, update gitignore
+[33mdd1ab60[m fix: move build deps to dependencies, add .gitignore
+[33mf1cc78e[m remove railway.json, use auto-detection
+[33m9a4912e[m fix: change builder to RAILPACK
+[33mb870f38[m fix: recreate railway.json
+[33me819e25[m initial commit

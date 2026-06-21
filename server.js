@@ -685,15 +685,71 @@ app.post('/webhook/telegram', async (req, res) => {
     console.error('❌ Ошибка в webhook/telegram:', err);
   }
 });
+
 // ════════════════════════════════════════════════════════════════
 // WEBHOOK: Бот поддержки (SUPPORT_BOT_TOKEN)
 // Принимает сообщения мастеров и чеки об оплате
-// ════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════
 app.post('/webhook/support', async (req, res) => {
   // Отвечаем Telegram сразу — не ждём обработки
   res.sendStatus(200);
   await handleSupportUpdate(req.body);
 });
+
+// ════════════════════════════════════════════════════════════════
+// ПРОКСИ: Supabase (обход блокировок РФ)
+// Все запросы /api/supabase/* → перенаправляются на supabase.co
+// ════════════════════════════════════════════════════════════════
+app.use('/api/supabase', async (req, res) => {
+  const SUPABASE_TARGET = 'https://aizkwhntugxitqiwnhgq.supabase.co';
+  
+  // Собираем полный URL: /api/supabase/rest/v1/... → https://xxx.supabase.co/rest/v1/...
+  const targetUrl = `${SUPABASE_TARGET}${req.url}`;
+
+  try {
+    // Копируем все заголовки от клиента, кроме host
+    const forwardHeaders = { ...req.headers };
+    delete forwardHeaders['host'];
+    delete forwardHeaders['content-length'];
+
+    // Тело запроса — только для POST/PATCH/PUT
+    const hasBody = ['POST', 'PATCH', 'PUT'].includes(req.method);
+    const bodyToSend = hasBody ? JSON.stringify(req.body) : undefined;
+
+    if (hasBody) {
+      forwardHeaders['content-type'] = 'application/json';
+    }
+
+    const response = await fetch(targetUrl, {
+      method:  req.method,
+      headers: forwardHeaders,
+      body:    bodyToSend,
+    });
+
+    // Пробрасываем статус и заголовки ответа обратно клиенту
+    res.status(response.status);
+
+    // Копируем нужные заголовки ответа
+    const headersToForward = [
+      'content-type',
+      'content-range',
+      'x-total-count',
+      'etag',
+    ];
+    headersToForward.forEach(h => {
+      const val = response.headers.get(h);
+      if (val) res.set(h, val);
+    });
+
+    const text = await response.text();
+    res.send(text);
+
+  } catch (err) {
+    console.error('❌ Ошибка Supabase прокси:', err);
+    res.status(502).json({ error: 'Proxy error', details: err.message });
+  }
+});
+
 // ════════════════════════════════════════════════════════════════
 // СТАТИКА
 // ════════════════════════════════════════════════════════════════
