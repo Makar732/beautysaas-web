@@ -223,10 +223,8 @@ export default function AdminPage() {
 
       if (error) throw error;
 
-      const rows = (data as unknown as MasterRow[]) ?? [];
-      const real = rows.filter(
-        (m) => m.name?.trim().length >= 2 && m.phone?.trim().length >= 5
-      );
+      // Получаем абсолютно все строки из базы данных без фильтрации
+      const real = (data as unknown as MasterRow[]) ?? [];
 
       setMasters(real);
 
@@ -235,7 +233,11 @@ export default function AdminPage() {
       setRowStates(initStates);
 
       const activePremium = real.filter((m) => m.is_premium).length;
-      setStats({ totalMasters: real.length, activePremium, mrr: activePremium * PREMIUM_PRICE });
+      setStats({ 
+        totalMasters: real.length, 
+        activePremium, 
+        mrr: activePremium * PREMIUM_PRICE 
+      });
     } catch (err) {
       console.error('❌ Ошибка загрузки:', err);
     } finally {
