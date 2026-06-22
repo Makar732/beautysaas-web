@@ -225,13 +225,13 @@ export default function AdminPage() {
 
       const rows = (data as unknown as MasterRow[]) ?? [];
 
-      // ✅ ИСПРАВЛЕНО: мягкий фильтр — показываем всех у кого есть id и имя
-      // Старые пользователи могут иметь пустой телефон — это не повод их скрывать
+      // ✅ ИСПРАВЛЕНО: показываем ВСЕ профили у которых есть id и имя
+      // Убираем жёсткий фильтр по телефону — старые пользователи могут иметь пустой phone
       const real = rows.filter(
         (m) => m.id && m.name?.trim().length >= 1
       );
 
-      console.log(`[AdminPage] Всего из БД: ${rows.length}, после фильтра: ${real.length}`);
+      console.log(`[AdminPage] Загрузка: всего из БД ${rows.length}, отображаем ${real.length}`);
 
       setMasters(real);
 
@@ -295,20 +295,19 @@ export default function AdminPage() {
       if (data.created === 0) {
         setSyncResult(
           `✅ Все синхронизировано. Новых пользователей не найдено ` +
-          `(всего в auth: ${data.total}, профилей: ${data.skipped}).`
+          `(всего в auth: ${data.total}, профилей в БД: ${data.allProfiles?.length ?? 0}).`
         );
       } else {
         setSyncResult(
-          `✅ Создано ${data.created} профилей: ` +
-          // СТАЛО:
-(data.details as Array<{ id: string; name: string; email?: string }>)
-  .map((u) => u.name || u.email || u.id)
-  .join(', ')
+          `✅ СОЗДАНО ${data.created} профилей в базе: ` +
+          (data.details as Array<{ id: string; name: string; email?: string }>)
+            .map((u) => u.name || u.email || u.id)
+            .join(', ')
         );
       }
 
-      // ✅ КЛЮЧЕВОЕ: если сервер вернул полный список — сразу пишем в стейт
-      // без повторного запроса к БД
+      // ✅ КЛЮЧЕВОЕ: сервер вернул ВСЕ профили — сразу пишем в стейт
+      // После перезагрузки страницы они останутся потому что реально в БД
       if (data.allProfiles && Array.isArray(data.allProfiles)) {
         const rows = data.allProfiles as MasterRow[];
         const real = rows.filter((m) => m.id && m.name?.trim().length >= 1);
@@ -324,7 +323,7 @@ export default function AdminPage() {
         const activePremium = real.filter((m) => m.is_premium).length;
         setStats({ totalMasters: real.length, activePremium, mrr: activePremium * PREMIUM_PRICE });
       } else {
-        // Fallback: перезагружаем через обычный запрос
+        // Fallback: перезагружаем через обычный запрос к БД
         await loadData();
       }
 

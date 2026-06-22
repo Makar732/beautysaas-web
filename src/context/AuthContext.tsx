@@ -203,12 +203,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     email: string,
     password: string
   ): Promise<{ error: string | null }> => {
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({ 
+      email, 
+      password,
+      options: {
+        data: {
+          email: email,
+        }
+      }
+    });
+    
     if (error) return { error: error.message };
+    
     if (data.user) {
+      // ✅ СОЗДАЁМ профиль в public.profiles СРАЗУ при регистрации
+      // Чтобы пользователь сразу появился в админке
+      const now = new Date().toISOString();
+      const tempName = `Пользователь ${data.user.id.slice(0, 6)}`;
+      const tempSlug = data.user.id.slice(0, 12);
+      
+      try {
+        await upsertMaster({
+          id:                data.user.id,
+          name:              tempName,
+          slug:              tempSlug,
+          phone:             '',
+          telegram_chat_id:  '',
+          telegram_bot_token:'',
+          telegram_id:       '',
+          trial_start_date:  now,
+          is_premium:        false,
+          plan_type:         'solo',
+          premium_expires_at: null,
+          workingHours:     { start: '09:00', end: '21:00' },
+          daysOff:          [],
+          created_at:        now,
+        } as any);
+        
+        console.log(`✅ Профиль создан при регистрации: ${data.user.id}`);
+      } catch (err) {
+        console.error('❌ Ошибка создания профиля при регистрации:', err);
+        // Не блокируем регистрацию если профиль не создался
+      }
+      
       sessionStorage.setItem('pending_user_id',    data.user.id);
       sessionStorage.setItem('pending_user_email', email);
     }
+    
     return { error: null };
   };
 
@@ -217,8 +258,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     name: string,
     phone: string
   ): Promise<void> => {
-    const userId =
-      sessionStorage.getItem('pending_user_id') || `master-${Date.now()}`;
+    const userId = sessionStorage.getItem('pending_user_id');
+    
+    if (!userId) {
+      console.error('❌ Нет pending_user_id для онбординга');
+      throw new Error('Ошибка онбординга: нет ID пользователя');
+    }
+    
     const slug           = generateSlug(name);
     const trialStartDate = new Date().toISOString();
 
@@ -242,6 +288,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       daysOff:      [],
     };
 
+    // ✅ Обновляем существующий профиль (он уже создан при регистрации)
     await upsertMaster({
       id:                newUser.id,
       name:              newUser.name,
@@ -265,6 +312,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     sessionStorage.removeItem('pending_user_id');
     sessionStorage.removeItem('pending_user_email');
+    
+    console.log(`✅ Онбординг завершён: ${userId}`);
   };
 
   // ── Выход ─────────────────────────────────────────────────

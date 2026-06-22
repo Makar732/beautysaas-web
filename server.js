@@ -388,7 +388,7 @@ app.post('/api/sync-users', async (req, res) => {
   }
 
   try {
-    // ── Шаг 1: все пользователи из auth ───────────────────────
+    // ── Шаг 1: все пользователи из auth ──────────────────────
     const { data: authData, error: authError } = await supabase.auth.admin.listUsers({
       perPage: 1000,
     });
@@ -402,7 +402,19 @@ app.post('/api/sync-users', async (req, res) => {
     console.log(`[sync-users] Auth users: ${authUsers.length}`);
 
     if (authUsers.length === 0) {
-      return res.json({ created: 0, total: 0, skipped: 0, details: [], allProfiles: [] });
+      // Даже если нет юзеров — возвращаем все профили из БД
+      const { data: allProfiles } = await supabase
+        .from('profiles')
+        .select('id,name,phone,slug,is_premium,premium_expires_at,plan_type,trial_start_date,created_at,telegram_id,telegram_chat_id')
+        .order('created_at', { ascending: false });
+
+      return res.json({
+        created: 0,
+        total: 0,
+        skipped: 0,
+        details: [],
+        allProfiles: allProfiles ?? [],
+      });
     }
 
     // ── Шаг 2: все существующие profiles ──────────────────────
@@ -422,7 +434,7 @@ app.post('/api/sync-users', async (req, res) => {
     const lost = authUsers.filter((u) => !existingIds.has(u.id));
     console.log(`[sync-users] Lost users: ${lost.length}`);
 
-    // ── Шаг 4: создаём профили для потерянных ─────────────────
+    // ─ Шаг 4: создаём профили для потерянных (РЕАЛЬНЫЙ INSERT) ─
     let createdCount = 0;
     let insertedDetails = [];
 
@@ -437,17 +449,19 @@ app.post('/api/sync-users', async (req, res) => {
                           || u.user_metadata?.name
                           || 'Новый мастер',
         phone:            u.user_metadata?.phone || '',
-        slug:             u.id,
+        slug:             u.id.slice(0, 12),  // первые 12 символов UUID как временный slug
         plan_type:        'solo',
         is_premium:       false,
         trial_start_date: now,
         created_at:       u.created_at || now,
       }));
 
+      console.log('[sync-users] Вставка профилей:', toInsert.length);
+
       const { data: inserted, error: insertError } = await supabase
         .from('profiles')
         .insert(toInsert)
-        .select('id, name');
+        .select('id, name, phone, slug, plan_type, is_premium, trial_start_date, created_at');
 
       if (insertError) {
         console.error('❌ [sync-users] Ошибка вставки:', insertError);
@@ -456,10 +470,10 @@ app.post('/api/sync-users', async (req, res) => {
 
       createdCount = inserted?.length ?? 0;
       insertedDetails = inserted ?? [];
-      console.log(`✅ [sync-users] Создано профилей: ${createdCount}`);
+      console.log(`✅ [sync-users] СОЗДАНО ${createdCount} профилей в БД`);
     }
 
-    // ── Шаг 5: возвращаем ВСЕ профили для мгновенного отображения на фронтенде
+    // ── Шаг 5: возвращаем ВСЕ профили из БД (для мгновенного отображения) ─
     const { data: allProfiles, error: allProfilesError } = await supabase
       .from('profiles')
       .select(
@@ -470,13 +484,7 @@ app.post('/api/sync-users', async (req, res) => {
 
     if (allProfilesError) {
       console.error('❌ [sync-users] Ошибка получения всех профилей:', allProfilesError);
-      // Не фатально — фронтенд сделает loadData() как fallback
-      return res.json({
-        created:  createdCount,
-        total:    authUsers.length,
-        skipped:  existingIds.size,
-        details:  insertedDetails,
-      });
+      return res.status(500).json({ error: allProfilesError.message });
     }
 
     console.log(`[sync-users] Всего профилей в БД: ${allProfiles?.length ?? 0}`);
@@ -486,9 +494,9 @@ app.post('/api/sync-users', async (req, res) => {
       total:       authUsers.length,
       skipped:     existingIds.size,
       details:     insertedDetails,
-      allProfiles: allProfiles ?? [],
+      allProfiles: allProfiles ?? [],  // ← ВСЕ профили для фронтенда
       message:     createdCount > 0
-        ? `Создано ${createdCount} новых профилей`
+        ? `Создано ${createdCount} новых профилей в базе`
         : 'Все пользователи уже синхронизированы',
     });
 

@@ -78,10 +78,21 @@ export async function upsertMaster(master: Master): Promise<void> {
     days_off:           master.daysOff            || [],
     created_at:         master.created_at,
   };
-  console.log('💾 Сохраняем профиль:', dbMaster);
-  const { error } = await supabase.from('profiles').upsert(dbMaster);
-  if (error) console.error('Ошибка upsertMaster:', error);
-  else console.log('✅ Профиль сохранён!');
+  
+  console.log('💾 Сохраняем профиль в БД:', {
+    id: dbMaster.id,
+    name: dbMaster.name,
+    phone: dbMaster.phone,
+  });
+  
+  const { data, error } = await supabase.from('profiles').upsert(dbMaster).select();
+  
+  if (error) {
+    console.error('❌ Ошибка upsertMaster:', error);
+    throw error;  // ← Теперь ошибка пробрасывается чтобы вызвать повторную попытку
+  }
+  
+  console.log('✅ Профиль сохранён в БД:', data?.[0]?.id);
 }
 
 // ---- SERVICES --------------------------------------------
