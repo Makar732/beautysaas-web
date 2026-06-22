@@ -300,9 +300,10 @@ export default function AdminPage() {
       } else {
         setSyncResult(
           `✅ Создано ${data.created} профилей: ` +
-          (data.details as Array<{ name: string; email?: string }>)
-            .map((u) => u.name || u.email || u.id)
-            .join(', ')
+          // СТАЛО:
+(data.details as Array<{ id: string; name: string; email?: string }>)
+  .map((u) => u.name || u.email || u.id)
+  .join(', ')
         );
       }
 
