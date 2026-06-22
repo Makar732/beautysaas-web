@@ -507,6 +507,50 @@ app.post('/api/sync-users', async (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════════════
+// API: Админское обновление профиля (обходит все ограничения)
+// Использует service_role ключ для гарантированной записи
+// ════════════════════════════════════════════════════════════════
+app.post('/api/admin-update-profile', async (req, res) => {
+  const { admin_id, master_id, updates } = req.body;
+
+  if (!ADMIN_UUID || admin_id !== ADMIN_UUID) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return res.status(500).json({
+      error: 'SUPABASE_SERVICE_ROLE_KEY не задан.',
+    });
+  }
+
+  try {
+    console.log(`[admin-update] Обновляем профиль ${master_id}:`, updates);
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .update(updates)
+      .eq('id', master_id)
+      .select();
+
+    if (error) {
+      console.error('❌ [admin-update] Ошибка:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: 'Профиль не найден' });
+    }
+
+    console.log(`✅ [admin-update] Профиль обновлён: ${master_id}`);
+    return res.json({ success: true, data: data[0] });
+
+  } catch (err) {
+    console.error('❌ [admin-update] Неожиданная ошибка:', err);
+    return res.status(500).json({ error: err.message || 'Unknown error' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════
 // API: Проверка истечения триалов → уведомление мастерам
 // ════════════════════════════════════════════════════════════════
 app.post('/api/check-trial-expiry', async (req, res) => {

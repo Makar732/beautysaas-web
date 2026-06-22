@@ -346,6 +346,7 @@ export default function AdminPage() {
     setShowPlanModal(true);
   };
 
+  // ✅ 1. ОБНОВЛЕНО: handleGrantPlanConfirm
   const handleGrantPlanConfirm = async () => {
     if (!selectedMasterForPlan) return;
     setBtn(selectedMasterForPlan.id, 'grantPlan', 'loading');
@@ -354,22 +355,30 @@ export default function AdminPage() {
       const expiry = new Date(now);
       expiry.setDate(expiry.getDate() + 30);
 
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          is_premium:         true,
-          plan_type:          selectedPlanType,
-          premium_expires_at: expiry.toISOString(),
-        })
-        .eq('id', selectedMasterForPlan.id);
+      // ✅ ИСПОЛЬЗУЕМ АДМИНСКИЙ ЭНДПОИНТ вместо прямого запроса
+      const res = await fetch('/api/admin-update-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          admin_id: user?.id,
+          master_id: selectedMasterForPlan.id,
+          updates: {
+            is_premium: true,
+            plan_type: selectedPlanType,
+            premium_expires_at: expiry.toISOString(),
+          },
+        }),
+      });
 
-      if (error) throw error;
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error);
 
       patchMaster(selectedMasterForPlan.id, {
-        is_premium:         true,
-        plan_type:          selectedPlanType,
+        is_premium: true,
+        plan_type: selectedPlanType,
         premium_expires_at: expiry.toISOString(),
       });
+      
       setBtn(selectedMasterForPlan.id, 'grantPlan', 'success');
       autoReset(`gp_${selectedMasterForPlan.id}`, selectedMasterForPlan.id, 'grantPlan');
       setShowPlanModal(false);
@@ -380,7 +389,7 @@ export default function AdminPage() {
     }
   };
 
-  // ─── +30 дней Premium ──────────────────────────────────────
+  // ✅ 2. ОБНОВЛЕНО: handleExtend
   const handleExtend = async (master: MasterRow) => {
     if (rowStates[master.id]?.extend === 'loading') return;
     setBtn(master.id, 'extend', 'loading');
@@ -395,11 +404,22 @@ export default function AdminPage() {
       const newExpiry = new Date(base);
       newExpiry.setDate(newExpiry.getDate() + 30);
 
-      const { error } = await supabase
-        .from('profiles')
-        .update({ is_premium: true, premium_expires_at: newExpiry.toISOString() })
-        .eq('id', master.id);
-      if (error) throw error;
+      // ✅ ИСПОЛЬЗУЕМ АДМИНСКИЙ ЭНДПОИНТ
+      const res = await fetch('/api/admin-update-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          admin_id: user?.id,
+          master_id: master.id,
+          updates: {
+            is_premium: true,
+            premium_expires_at: newExpiry.toISOString(),
+          },
+        }),
+      });
+
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error);
 
       patchMaster(master.id, { is_premium: true, premium_expires_at: newExpiry.toISOString() });
       setBtn(master.id, 'extend', 'success');
@@ -410,7 +430,7 @@ export default function AdminPage() {
     }
   };
 
-  // ─── Снять Premium ─────────────────────────────────────────
+  // ✅ 3. ОБНОВЛЕНО: handleRevoke
   const handleRevoke = async (master: MasterRow) => {
     const state = rowStates[master.id]?.revoke;
     if (state === 'loading') return;
@@ -422,11 +442,23 @@ export default function AdminPage() {
     clearTimeout(confirmTimers.current[`rev_${master.id}`]);
     setBtn(master.id, 'revoke', 'loading');
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ is_premium: false, premium_expires_at: null, plan_type: null })
-        .eq('id', master.id);
-      if (error) throw error;
+      // ✅ ИСПОЛЬЗУЕМ АДМИНСКИЙ ЭНДПОИНТ
+      const res = await fetch('/api/admin-update-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          admin_id: user?.id,
+          master_id: master.id,
+          updates: {
+            is_premium: false,
+            premium_expires_at: null,
+            plan_type: null,
+          },
+        }),
+      });
+
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error);
 
       patchMaster(master.id, { is_premium: false, premium_expires_at: null, plan_type: null });
       setBtn(master.id, 'revoke', 'success');
@@ -437,17 +469,28 @@ export default function AdminPage() {
     }
   };
 
-  // ─── +14 дней триала ───────────────────────────────────────
+  // ✅ 4. ОБНОВЛЕНО: handleGrantTrial
   const handleGrantTrial = async (master: MasterRow) => {
     if (rowStates[master.id]?.grantTrial === 'loading') return;
     setBtn(master.id, 'grantTrial', 'loading');
     try {
       const newStart = new Date().toISOString();
-      const { error } = await supabase
-        .from('profiles')
-        .update({ trial_start_date: newStart })
-        .eq('id', master.id);
-      if (error) throw error;
+      
+      // ✅ ИСПОЛЬЗУЕМ АДМИНСКИЙ ЭНДПОИНТ
+      const res = await fetch('/api/admin-update-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          admin_id: user?.id,
+          master_id: master.id,
+          updates: {
+            trial_start_date: newStart,
+          },
+        }),
+      });
+
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error);
 
       patchMaster(master.id, { trial_start_date: newStart });
       setBtn(master.id, 'grantTrial', 'success');
@@ -458,18 +501,29 @@ export default function AdminPage() {
     }
   };
 
-  // ─── Сбросить триал ────────────────────────────────────────
+  // ✅ 5. ОБНОВЛЕНО: handleResetTrial
   const handleResetTrial = async (master: MasterRow) => {
     if (rowStates[master.id]?.resetTrial === 'loading') return;
     setBtn(master.id, 'resetTrial', 'loading');
     try {
       const expired = new Date();
       expired.setDate(expired.getDate() - 15);
-      const { error } = await supabase
-        .from('profiles')
-        .update({ trial_start_date: expired.toISOString() })
-        .eq('id', master.id);
-      if (error) throw error;
+      
+      // ✅ ИСПОЛЬЗУЕМ АДМИНСКИЙ ЭНДПОИНТ
+      const res = await fetch('/api/admin-update-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          admin_id: user?.id,
+          master_id: master.id,
+          updates: {
+            trial_start_date: expired.toISOString(),
+          },
+        }),
+      });
+
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error);
 
       patchMaster(master.id, { trial_start_date: expired.toISOString() });
       setBtn(master.id, 'resetTrial', 'success');
