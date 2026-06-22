@@ -388,7 +388,7 @@ app.post('/api/sync-users', async (req, res) => {
   }
 
   try {
-    // Шаг 1: все пользователи из auth
+    // ── Шаг 1: все пользователи из auth ───────────────────────
     const { data: authData, error: authError } = await supabase.auth.admin.listUsers({
       perPage: 1000,
     });
@@ -402,13 +402,13 @@ app.post('/api/sync-users', async (req, res) => {
     console.log(`[sync-users] Auth users: ${authUsers.length}`);
 
     if (authUsers.length === 0) {
-      return res.json({ created: 0, total: 0, skipped: 0, details: [] });
+      return res.json({ created: 0, total: 0, skipped: 0, details: [], allProfiles: [] });
     }
 
-    // Шаг 2: все существующие profiles — только поле id
+    // ── Шаг 2: все существующие profiles ──────────────────────
     const { data: existingProfiles, error: profilesError } = await supabase
       .from('profiles')
-      .select('id');  // ← только id, никакого email
+      .select('id');
 
     if (profilesError) {
       console.error('❌ [sync-users] Ошибка чтения profiles:', profilesError);
@@ -418,59 +418,78 @@ app.post('/api/sync-users', async (req, res) => {
     const existingIds = new Set((existingProfiles ?? []).map((p) => p.id));
     console.log(`[sync-users] Existing profiles: ${existingIds.size}`);
 
-    // Шаг 3: фильтруем "потерянных"
+    // ── Шаг 3: фильтруем "потерянных" ─────────────────────────
     const lost = authUsers.filter((u) => !existingIds.has(u.id));
     console.log(`[sync-users] Lost users: ${lost.length}`);
 
-    if (lost.length === 0) {
+    // ── Шаг 4: создаём профили для потерянных ─────────────────
+    let createdCount = 0;
+    let insertedDetails = [];
+
+    if (lost.length > 0) {
+      const now = new Date().toISOString();
+
+      const toInsert = lost.map((u) => ({
+        id:               u.id,
+        name:             u.raw_user_meta_data?.full_name
+                          || u.raw_user_meta_data?.name
+                          || u.user_metadata?.full_name
+                          || u.user_metadata?.name
+                          || 'Новый мастер',
+        phone:            u.user_metadata?.phone || '',
+        slug:             u.id,
+        plan_type:        'solo',
+        is_premium:       false,
+        trial_start_date: now,
+        created_at:       u.created_at || now,
+      }));
+
+      const { data: inserted, error: insertError } = await supabase
+        .from('profiles')
+        .insert(toInsert)
+        .select('id, name');
+
+      if (insertError) {
+        console.error('❌ [sync-users] Ошибка вставки:', insertError);
+        return res.status(500).json({ error: insertError.message });
+      }
+
+      createdCount = inserted?.length ?? 0;
+      insertedDetails = inserted ?? [];
+      console.log(`✅ [sync-users] Создано профилей: ${createdCount}`);
+    }
+
+    // ── Шаг 5: возвращаем ВСЕ профили для мгновенного отображения на фронтенде
+    const { data: allProfiles, error: allProfilesError } = await supabase
+      .from('profiles')
+      .select(
+        'id,name,phone,slug,is_premium,premium_expires_at,plan_type,' +
+        'trial_start_date,created_at,telegram_id,telegram_chat_id'
+      )
+      .order('created_at', { ascending: false });
+
+    if (allProfilesError) {
+      console.error('❌ [sync-users] Ошибка получения всех профилей:', allProfilesError);
+      // Не фатально — фронтенд сделает loadData() как fallback
       return res.json({
-        created: 0,
-        total: authUsers.length,
-        skipped: existingIds.size,
-        details: [],
-        message: 'Все пользователи уже синхронизированы',
+        created:  createdCount,
+        total:    authUsers.length,
+        skipped:  existingIds.size,
+        details:  insertedDetails,
       });
     }
 
-    // Шаг 4: вставляем только поля которые есть в public.profiles
-    // email не трогаем — его там нет
-    const now = new Date().toISOString();
-
-    const toInsert = lost.map((u) => ({
-      id:               u.id,
-      // Имя: пробуем вытащить из метаданных, иначе заглушка
-      name:             u.raw_user_meta_data?.full_name
-                        || u.raw_user_meta_data?.name
-                        || u.user_metadata?.full_name
-                        || u.user_metadata?.name
-                        || 'Новый Салон',
-      phone:            u.user_metadata?.phone || '',
-      slug:             u.id,          // временный slug = uuid
-      plan_type:        'solo',
-      is_premium:       false,
-      trial_start_date: now,
-      created_at:       u.created_at || now,
-    }));
-
-    const { data: inserted, error: insertError } = await supabase
-      .from('profiles')
-      .insert(toInsert)
-      .select('id, name');  // ← только id и name, без email
-
-    if (insertError) {
-      console.error('❌ [sync-users] Ошибка вставки:', insertError);
-      return res.status(500).json({ error: insertError.message });
-    }
-
-    const createdCount = inserted?.length ?? 0;
-    console.log(`✅ [sync-users] Создано профилей: ${createdCount}`);
+    console.log(`[sync-users] Всего профилей в БД: ${allProfiles?.length ?? 0}`);
 
     return res.json({
-      created:  createdCount,
-      total:    authUsers.length,
-      skipped:  existingIds.size,
-      details:  inserted ?? [],
-      message:  `Создано ${createdCount} новых профилей`,
+      created:     createdCount,
+      total:       authUsers.length,
+      skipped:     existingIds.size,
+      details:     insertedDetails,
+      allProfiles: allProfiles ?? [],
+      message:     createdCount > 0
+        ? `Создано ${createdCount} новых профилей`
+        : 'Все пользователи уже синхронизированы',
     });
 
   } catch (err) {

@@ -119,16 +119,16 @@ function defaultRowStates(): RowStates {
 
 // ─── Универсальная кнопка действия ───────────────────────────
 interface ActionBtnProps {
-  btnState:       BtnState;
-  onClick:        () => void;
-  idleClass:      string;
-  idleContent:    React.ReactNode;
+  btnState:        BtnState;
+  onClick:         () => void;
+  idleClass:       string;
+  idleContent:     React.ReactNode;
   confirmContent?: React.ReactNode;
-  confirmClass?:  string;
+  confirmClass?:   string;
   successContent?: React.ReactNode;
-  successClass?:  string;
-  visible?:       boolean;
-  title?:         string;
+  successClass?:   string;
+  visible?:        boolean;
+  title?:          string;
 }
 
 function ActionBtn({
@@ -187,14 +187,14 @@ export default function AdminPage() {
   const [broadcastStatus, setBroadcastStatus] = useState<'idle'|'sending'|'success'|'error'>('idle');
   const [broadcastResult, setBroadcastResult] = useState('');
 
-  // ── Синхронизация БД ──────────────────────────────────────
+  // Синхронизация БД
   const [syncState,  setSyncState]  = useState<'idle'|'loading'|'success'|'error'>('idle');
   const [syncResult, setSyncResult] = useState('');
 
   // Модалка выбора плана
-  const [showPlanModal,          setShowPlanModal]          = useState(false);
-  const [selectedMasterForPlan,  setSelectedMasterForPlan]  = useState<MasterRow | null>(null);
-  const [selectedPlanType,       setSelectedPlanType]       = useState<'solo'|'salon'>('solo');
+  const [showPlanModal,         setShowPlanModal]         = useState(false);
+  const [selectedMasterForPlan, setSelectedMasterForPlan] = useState<MasterRow | null>(null);
+  const [selectedPlanType,      setSelectedPlanType]      = useState<'solo'|'salon'>('solo');
 
   // Состояния кнопок строк
   const [rowStates, setRowStates] = useState<Record<string, RowStates>>({});
@@ -223,8 +223,15 @@ export default function AdminPage() {
 
       if (error) throw error;
 
-      // Получаем абсолютно все строки из базы данных без фильтрации
-      const real = (data as unknown as MasterRow[]) ?? [];
+      const rows = (data as unknown as MasterRow[]) ?? [];
+
+      // ✅ ИСПРАВЛЕНО: мягкий фильтр — показываем всех у кого есть id и имя
+      // Старые пользователи могут иметь пустой телефон — это не повод их скрывать
+      const real = rows.filter(
+        (m) => m.id && m.name?.trim().length >= 1
+      );
+
+      console.log(`[AdminPage] Всего из БД: ${rows.length}, после фильтра: ${real.length}`);
 
       setMasters(real);
 
@@ -233,11 +240,7 @@ export default function AdminPage() {
       setRowStates(initStates);
 
       const activePremium = real.filter((m) => m.is_premium).length;
-      setStats({ 
-        totalMasters: real.length, 
-        activePremium, 
-        mrr: activePremium * PREMIUM_PRICE 
-      });
+      setStats({ totalMasters: real.length, activePremium, mrr: activePremium * PREMIUM_PRICE });
     } catch (err) {
       console.error('❌ Ошибка загрузки:', err);
     } finally {
@@ -255,7 +258,7 @@ export default function AdminPage() {
 
   const patchMaster = (masterId: string, patch: Partial<MasterRow>) => {
     setMasters((prev) => {
-      const updated     = prev.map((m) => m.id === masterId ? { ...m, ...patch } : m);
+      const updated       = prev.map((m) => m.id === masterId ? { ...m, ...patch } : m);
       const activePremium = updated.filter((m) => m.is_premium).length;
       setStats({ totalMasters: updated.length, activePremium, mrr: activePremium * PREMIUM_PRICE });
       return updated;
@@ -290,29 +293,49 @@ export default function AdminPage() {
       setSyncState('success');
 
       if (data.created === 0) {
-        setSyncResult(`✅ Все синхронизировано. Новых пользователей не найдено (всего в auth: ${data.total}).`);
+        setSyncResult(
+          `✅ Все синхронизировано. Новых пользователей не найдено ` +
+          `(всего в auth: ${data.total}, профилей: ${data.skipped}).`
+        );
       } else {
         setSyncResult(
           `✅ Создано ${data.created} профилей: ` +
-          (data.details as Array<{name:string; email:string}>)
-            .map((u) => u.name || u.email)
+          (data.details as Array<{ name: string; email?: string }>)
+            .map((u) => u.name || u.email || u.id)
             .join(', ')
         );
       }
 
-      // Перезагружаем таблицу мастеров
-      await loadData();
+      // ✅ КЛЮЧЕВОЕ: если сервер вернул полный список — сразу пишем в стейт
+      // без повторного запроса к БД
+      if (data.allProfiles && Array.isArray(data.allProfiles)) {
+        const rows = data.allProfiles as MasterRow[];
+        const real = rows.filter((m) => m.id && m.name?.trim().length >= 1);
+
+        console.log(`[Sync] Получено профилей с сервера: ${real.length}`);
+
+        setMasters(real);
+
+        const initStates: Record<string, RowStates> = {};
+        real.forEach((m) => { initStates[m.id] = defaultRowStates(); });
+        setRowStates(initStates);
+
+        const activePremium = real.filter((m) => m.is_premium).length;
+        setStats({ totalMasters: real.length, activePremium, mrr: activePremium * PREMIUM_PRICE });
+      } else {
+        // Fallback: перезагружаем через обычный запрос
+        await loadData();
+      }
 
     } catch (err: any) {
       console.error('❌ Sync error:', err);
       setSyncState('error');
       setSyncResult(`❌ Ошибка: ${err.message}`);
     } finally {
-      // Через 6 секунд сбрасываем в idle
       setTimeout(() => {
         setSyncState('idle');
         setSyncResult('');
-      }, 6000);
+      }, 8000);
     }
   };
 
@@ -476,7 +499,7 @@ export default function AdminPage() {
       if (error) throw error;
 
       setMasters((prev) => {
-        const updated = prev.filter((m) => m.id !== master.id);
+        const updated       = prev.filter((m) => m.id !== master.id);
         const activePremium = updated.filter((m) => m.is_premium).length;
         setStats({ totalMasters: updated.length, activePremium, mrr: activePremium * PREMIUM_PRICE });
         return updated;
@@ -620,7 +643,7 @@ export default function AdminPage() {
           </p>
         </div>
 
-        {/* Результат синхронизации — показываем под заголовком */}
+        {/* Результат синхронизации */}
         {syncResult && (
           <div className={`flex items-start gap-3 px-4 py-3 rounded-xl text-sm border ${
             syncState === 'success'
